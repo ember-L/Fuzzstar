@@ -1,0 +1,8 @@
+docs/
+.codegraph/
+视觉参考/
+*.png
+.DS_Store
+.superpowers/
+backend/.venv*/
+backend/*.db
