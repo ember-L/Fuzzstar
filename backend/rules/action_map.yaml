@@ -1,0 +1,47 @@
+# 动作映射（FRD 附录 C）。版本化下发：改映射不改客户端代码。
+# source 优先级见 priority；同优先级内按 rules 顺序取第一条命中；播完回 idle。
+version: am-2026-11-18
+actions: [idle, happy, sad, sick, crouch, look_left, look_right]
+priority: [health, chat_emotion, interaction, idle]
+rules:
+  - source: health
+    condition: {state: normal, events: none}
+    action: idle
+    note: 默认待机，可随机穿插小幅动作
+  - source: health
+    condition: {state: [observe, vet]}
+    action: sick
+    note: 居家观察/就医状态联动
+  - source: health
+    condition: {state: urgent}
+    action: sick
+    note: 同时叠加红色就医卡
+  - source: chat_emotion
+    condition: {emotion: happy}
+    action: happy
+    note: 解读气泡到达时播放一次
+  - source: chat_emotion
+    condition: {emotion: relaxed}
+    action: idle
+  - source: chat_emotion
+    condition: {emotion: annoyed}
+    action: crouch
+    note: 压低身体姿态
+  - source: chat_emotion
+    condition: {emotion: fearful}
+    action: sad
+  - source: chat_emotion
+    condition: {emotion: painful}
+    action: sick
+  - source: chat_emotion
+    condition: {emotion: seeking_attention}
+    action: [look_left, look_right]
+    note: 左右张望交替
+  - source: interaction
+    condition: {gesture: tap}
+    action: [look_left, look_right]
+    note: 左右交替回应
+  - source: interaction
+    condition: {gesture: long_press}
+    action: happy
+    note: 抚摸反馈

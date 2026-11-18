@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
@@ -9,7 +10,9 @@ from sqlalchemy import create_engine
 
 from app.auth import APIError, api_error, auth_rate_limit, router
 from app.avatar_api import router as avatar_router
+from app.config_api import router as config_router
 from app.media import PhotoStorage
+from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
 from app.task_api import router as task_router
@@ -53,12 +56,15 @@ def create_dev_app():
             raise RuntimeError('Policy URLs must be HTTPS links')
     instance.state.policy_links = links
     instance.state.photo_storage = PhotoStorage.from_env()
+    rules_dir = Path(os.environ.get('RULES_DIR') or Path(__file__).resolve().parents[1] / 'rules')
+    instance.state.action_map = load_action_map(rules_dir)
     instance.get('/api/v1/health')(health)
     instance.include_router(router)
     instance.include_router(pet_router)
     instance.include_router(avatar_router)
     instance.include_router(task_router)
     instance.include_router(media_router)
+    instance.include_router(config_router)
     instance.middleware('http')(auth_rate_limit)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
