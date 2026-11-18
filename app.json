@@ -19,11 +19,15 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-image-picker", {
-        "photosPermission": "允许绒星访问你选择上传的猫咪照片。",
-        "cameraPermission": false,
-        "microphonePermission": false
-      }]
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许绒星访问你选择上传的猫咪照片。",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "expo-sqlite"
     ]
   }
 }

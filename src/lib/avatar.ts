@@ -37,3 +37,33 @@ export function pickIdleSource(avatar: AvatarLike): IdleSource {
   if (placeholder) return { kind: 'placeholder', url: placeholder };
   return { kind: 'static' };
 }
+
+// T07 动作候选：个人片 → 占位片 → 静态底图（F03-6）。
+// 缓存键按内容版本（pet/action/version_id 或占位库版本），签名 URL 过期不影响命中。
+export type SourceKind = 'personal' | 'placeholder' | 'static';
+
+export interface ClipCandidate {
+  action: string;
+  kind: SourceKind;
+  key: string | null;
+  url: string | null;
+}
+
+export function candidateFor(
+  action: string,
+  avatar: AvatarLike,
+  petId: number,
+  degraded: Record<string, 'placeholder' | 'static'> = {},
+): ClipCandidate {
+  const level = degraded[action];
+  const personal = avatar?.clips?.[action];
+  if (level !== 'placeholder' && level !== 'static' && personal?.status === 'ready' && personal.url) {
+    return { action, kind: 'personal', key: `p:${petId}:${action}:${personal.version_id ?? 'v0'}`, url: personal.url };
+  }
+  const manifest = avatar?.placeholder_manifest;
+  const placeholder = manifest?.clips?.[action];
+  if (level !== 'static' && manifest && placeholder) {
+    return { action, kind: 'placeholder', key: `ph:${manifest.version}:${manifest.body_type}:${action}`, url: placeholder };
+  }
+  return { action, kind: 'static', key: null, url: null };
+}

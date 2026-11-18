@@ -1,10 +1,13 @@
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Image, StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import { api } from '../lib/api';
-import { pickIdleSource, type AvatarView, type PlaceholderManifest } from '../lib/avatar';
+import { type ActionMap } from '../lib/action-map';
+import { loadActionMap } from '../lib/action-map-client';
+import { getAssetStore } from '../lib/asset-store';
+import { type AvatarView, type PlaceholderManifest } from '../lib/avatar';
 import { ApiError } from '../lib/session';
 import { pollTask, type TaskSnapshot } from '../lib/task-poller';
+import { AvatarPlayer, type HealthInput } from './avatar/AvatarPlayer';
 import { colors } from '../theme';
 
 export interface Submission {
@@ -12,11 +15,16 @@ export interface Submission {
   placeholder: PlaceholderManifest;
 }
 
-// 首页分身舞台：提交后立即播放占位首帧（AC-03-1），生成成功后切换个人 idle 片。
-// 完整动作播放器（附录 C 联动/淡入淡出/缓存）在 T07 实现。
-export function AvatarStage({ pet, submission }: { pet: { id: number; name: string }; submission?: Submission }) {
+// 首页分身舞台：提交后立即播放占位首帧（AC-03-1），轮询任务，播放交给 AvatarPlayer。
+// health 由 T08 健康 store 接线；当前首页无健康数据时按 normal 待机。
+export function AvatarStage({ pet, submission, health }: {
+  pet: { id: number; name: string };
+  submission?: Submission;
+  health?: HealthInput | null;
+}) {
   const [fetched, setFetched] = useState<AvatarView | null>(null);
   const [notice, setNotice] = useState<{ taskId: string; text: string } | null>(null);
+  const [map, setMap] = useState<ActionMap | null>(null);
   const polling = useRef<AbortController | null>(null);
   const mounted = useRef(true);
 
@@ -27,6 +35,22 @@ export function AvatarStage({ pet, submission }: { pet: { id: number; name: stri
       polling.current?.abort();
       polling.current = null;
     };
+  }, []);
+
+  // 动作映射：挂载/回前台/每 60s 比对版本更新（AC-04-4 免发版生效），离线用缓存。
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const store = await getAssetStore();
+        const next = await loadActionMap(signal => api.authorized('/config/action-map', { signal }), store.kv);
+        if (!cancelled && next) setMap(next);
+      } catch { /* 保持现有映射或 idle 待机 */ }
+    };
+    void refresh();
+    const sub = AppState.addEventListener('change', state => { if (state === 'active') void refresh(); });
+    const timer = setInterval(() => { if (AppState.currentState === 'active') void refresh(); }, 60000);
+    return () => { cancelled = true; sub.remove(); clearInterval(timer); };
   }, []);
 
   const fetchAvatar = useCallback(async (signal?: AbortSignal): Promise<AvatarView | null> => {
@@ -84,26 +108,9 @@ export function AvatarStage({ pet, submission }: { pet: { id: number; name: stri
   const caption = notice && avatar && notice.taskId === avatar.task_id ? notice.text
     : avatar && (avatar.status === 'pending' || avatar.status === 'running') ? '分身生成中…' : '';
 
-  const source = pickIdleSource(avatar);
-  const url = source.kind === 'static' ? null : source.url;
-  const player = useVideoPlayer(url, setup => { setup.loop = true; setup.muted = true; });
-  useEffect(() => {
-    if (!url) return;
-    const sync = () => { if (AppState.currentState === 'active') player.play(); else player.pause(); };
-    sync();
-    const subscription = AppState.addEventListener('change', sync);
-    return () => { subscription.remove(); player.pause(); };
-  }, [url, player]);
-
   return (
     <View style={styles.stage}>
-      {url ? (
-        <VideoView player={player} style={styles.media} contentFit="contain" nativeControls={false}
-          accessibilityLabel={`${pet.name}的分身`} />
-      ) : (
-        <Image source={require('../../../assets/figma/59f10c90466cfa3aa84c0f88478dccedc8f69565.png')}
-          style={styles.media} accessibilityLabel={`${pet.name}的示意图`} />
-      )}
+      <AvatarPlayer pet={pet} avatar={avatar} map={map} health={health} />
       {caption ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{caption}</Text> : null}
     </View>
   );
@@ -111,6 +118,5 @@ export function AvatarStage({ pet, submission }: { pet: { id: number; name: stri
 
 const styles = StyleSheet.create({
   stage: { width: '47%', maxWidth: 165, height: 195, alignSelf: 'flex-end' },
-  media: { width: '100%', flex: 1 },
   caption: { fontSize: 10, lineHeight: 14, color: colors.secondary, textAlign: 'center' },
 });
