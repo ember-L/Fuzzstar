@@ -84,6 +84,23 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 merged = await client.post(f'/api/v1/pets/{pet_id}/avatar', headers=headers,
                                            json={'media_id': media_id})
                 self.assertEqual(merged.json()['task_id'], task_id)
+                manifest = submitted.json()['placeholder_manifest']
+                self.assertEqual(manifest['body_type'], 'standard')
+                self.assertEqual(manifest['version'], 'v1')
+                self.assertEqual(set(manifest['clips']), set(ACTIONS))
+                clip = await client.get(manifest['clips']['idle'])
+                self.assertEqual(clip.status_code, 200)
+                self.assertEqual(clip.headers['content-type'], 'video/mp4')
+                self.assertIn('immutable', clip.headers['cache-control'])
+                self.assertGreater(len(clip.content), 0)
+                action_map = await client.get('/api/v1/config/action-map', headers=headers)
+                action_map.raise_for_status()
+                self.assertEqual(action_map.json()['version'], 'am-2026-11-18')
+                pending_view = await client.get(f'/api/v1/pets/{pet_id}/avatar', headers=headers)
+                pending_view.raise_for_status()
+                self.assertEqual(pending_view.json()['task_id'], task_id)
+                self.assertIsNone(pending_view.json()['base_image'])
+                self.assertEqual(pending_view.json()['placeholder_manifest'], manifest)
 
                 worker_engine = create_engine(url)
                 self.addCleanup(worker_engine.dispose)
@@ -121,6 +138,16 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                         assets.client.head_object, Bucket=assets.bucket,
                         Key=result['base_image']['key'], VersionId=result['base_image']['version_id'])
                     self.assertGreater(head['ContentLength'], 0)
+                    view = await client.get(f'/api/v1/pets/{pet_id}/avatar', headers=headers)
+                    view.raise_for_status()
+                    avatar = view.json()
+                    self.assertTrue(avatar['usable'])
+                    self.assertEqual(avatar['ready_count'], 7)
+                    self.assertEqual(avatar['task_id'], task_id)
+                    for asset_url in [avatar['base_image']['url'], avatar['clips']['idle']['url']]:
+                        fetched = await asyncio.to_thread(httpx.get, asset_url, timeout=15)
+                        self.assertEqual(fetched.status_code, 200)
+                        self.assertGreater(len(fetched.content), 0)
                 finally:
                     running.cancel()
                     try:
