@@ -76,6 +76,7 @@ class Pet(Base):
     sex: Mapped[str] = mapped_column(String(16), default='unknown')
     birth_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     neutered: Mapped[bool] = mapped_column(Boolean, default=False)
+    body_type: Mapped[str] = mapped_column(String(16), default='standard', server_default='standard', nullable=False)
     status: Mapped[str] = mapped_column(String(16), default='active')
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

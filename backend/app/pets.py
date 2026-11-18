@@ -19,6 +19,7 @@ class PetInput(BaseModel):
     sex: Literal['male', 'female', 'unknown'] = 'unknown'
     birth_date: Optional[date] = None
     neutered: bool = False
+    body_type: Literal['slim', 'standard', 'chubby'] = 'standard'
 
     @field_validator('birth_date')
     @classmethod

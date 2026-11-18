@@ -65,6 +65,14 @@ class PhotoStorage:
         except (BotoCoreError, ClientError) as exc:
             raise storage_unavailable() from exc
 
+    def asset_url(self, key: str, version_id: str) -> str:
+        try:
+            return self.client.generate_presigned_url('get_object', Params={
+                'Bucket': self.bucket, 'Key': key, 'VersionId': version_id,
+            }, ExpiresIn=DOWNLOAD_SECONDS)
+        except (BotoCoreError, ClientError) as exc:
+            raise storage_unavailable() from exc
+
     def verify(self, photo: MediaUpload) -> str:
         ref = {'Bucket': self.bucket, 'Key': photo.object_key}
         try:
