@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 
 from app.auth import APIError, api_error, auth_rate_limit, router
+from app.avatar_api import router as avatar_router
 from app.media import PhotoStorage
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
@@ -55,6 +56,7 @@ def create_dev_app():
     instance.get('/api/v1/health')(health)
     instance.include_router(router)
     instance.include_router(pet_router)
+    instance.include_router(avatar_router)
     instance.include_router(task_router)
     instance.include_router(media_router)
     instance.middleware('http')(auth_rate_limit)

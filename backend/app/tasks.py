@@ -31,6 +31,12 @@ def enqueue_task(db: Session, pet_id: int, kind: str, idempotency_key: str, payl
     return task
 
 
+def requeue_task(db: Session, task_id: str) -> bool:
+    """User-initiated retry: a terminally failed task gets a fresh attempt budget."""
+    return db.execute(update(Task).where(Task.id == task_id, Task.status == 'failed')
+                      .values(status='pending', attempts=0, lease_until=None, result=None)).rowcount == 1
+
+
 def claim_task(db: Session, task_id: str, *, now: Optional[datetime] = None) -> Optional[int]:
     now = now if now is not None else datetime.now(timezone.utc).replace(tzinfo=None)
     expired = and_(Task.status == 'running', Task.lease_until <= now)
