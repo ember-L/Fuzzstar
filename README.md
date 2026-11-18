@@ -1,6 +1,6 @@
 # 绒星项目
 
-绒星 App 目前可在本地联调邮箱账号、协议同意、多猫档案和照片上传。产品与设计参考见 [项目规划与设计参考](项目规划与设计参考.md)，交付范围与进度见 [全栈任务规划](docs/superpowers/plans/2026-11-17-rongxing-full-stack.md)。
+绒星 App 目前可在本地联调邮箱账号、协议同意、多猫档案、照片上传与分身生成任务（arq worker + 移动端轮询）。产品与设计参考见 [项目规划与设计参考](项目规划与设计参考.md)，交付范围与进度见 [全栈任务规划](docs/superpowers/plans/2026-11-17-rongxing-full-stack.md)。
 
 ## 本地运行
 
@@ -38,9 +38,19 @@ uvicorn app.main:create_dev_app --factory --host 127.0.0.1
 2. 在 10 分钟内调用 `POST /api/v1/media/{media_id}/complete`。API 复核对象字节数及类型、解码图片并限制为单帧和最多 2500 万像素；首次通过后固定对象的 `VersionId`。重复上传不能替换已验证的版本。
 3. `GET /api/v1/media/{media_id}` 仅对归属当前账号活跃猫咪的已验证照片签发 60 分钟下载链接。已签发的链接在到期前仍可访问，请视作临时凭证。后续业务应使用 `media_id` 并再次校验其归属和已验证版本，不接受客户端传入的任意媒体 URL。
 
-仅联调照片，不提供视频／音频、单猫主体判定或分身提交。尚未自动清理过期票据、未引用对象及旧版本；不要把通用“删除非当前版本”策略直接用于此桶，否则可能删除仍被引用的版本。
+照片验证通过后，`POST /api/v1/pets/{pet_id}/avatar` 提交 `media_id` 即可创建分身生成任务（202 返回 `task_id`）；同猫已有进行中任务时合并返回同一 `task_id`，失败任务可用同一照片重试。过期未验证票据由 worker 在到期 1 小时后清理；被引用的对象版本按 `VersionId` 保留，不要把通用“删除非当前版本”策略直接用于此桶。视频／音频与单猫主体判定仍待后续需求。
 
-### 4. 移动端 / 网页
+### 4. 分身生成 worker
+
+任务以数据库为准，Redis/arq 只做分发。在 `backend` 目录用与 API 相同的 `DATABASE_URL` 和 `MEDIA_S3_*` 配置，另设 `REDIS_URL`（默认 `redis://127.0.0.1:6379`）和 `DASHSCOPE_API_KEY`，运行：
+
+```sh
+python -m arq app.worker.WorkerSettings
+```
+
+worker 每 5 秒 sweep 一次：分发 pending 任务、回收过期租约、把耗尽重试的过期任务置为 failed，并清理过期未验证照片票据。单步失败按数据库 attempts 重试（初次 + 最多两次），arq 自身不重复重试。分身管线先生成底图，再为 7 个动作（idle/happy/sad/sick/crouch/look_left/look_right）各生成一条短片，单条失败不阻塞其余；≥5 条就绪判定可用。当前 Provider 为 DashScope（qwen-image-edit 底图 + wanx2.1-i2v-turbo 图生视频），真实生成质量、耗时与成本尚未验收；测试用 fake provider 已验证完整管线。
+
+### 5. 移动端 / 网页
 
 需要 Node.js 和 npm。在 `mobile` 目录执行：
 
@@ -52,7 +62,7 @@ npm run web
 
 Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机网页；真机需要可达的开发 API 地址，发布版只接受 HTTPS。原生端通过 SecureStore 保存刷新令牌；网页仅在内存保留会话，刷新页面需重新登录。「在此设备退出登录」仅清理本机令牌，不吊销服务端会话。
 
-「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片；后端确认后才显示「照片已验证」，这不是分身生成，也不提供照片列表。健康和聊聊仍是占位；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。
+「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片并中断轮询；照片验证后自动提交分身生成，每 2 秒轮询任务状态，页面不可见时暂停，10 分钟超时后停止轮询并提示重试（后台任务继续）。生成失败、超时或不足 5/7 动作时提供「重试生成」。健康和聊聊仍是占位；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。
 
 ## 本地 API 范围
 
@@ -66,9 +76,10 @@ Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机�
 | `GET/POST /consents` | 读取协议链接及版本 / 同意当前版本；训练授权默认关闭，不提供设置入口 |
 | `GET/POST /pets`、`GET/PATCH/DELETE /pets/{id}` | 须登录并同意当前协议；最多 5 只活跃猫咪；删除为软删 |
 | `POST /media/presign`、`POST /media/{id}/complete`、`GET /media/{id}` | 本地照片上传签名、验证与版本化下载；须已登录、同意当前协议且拥有活跃猫咪 |
+| `POST /pets/{id}/avatar` | 提交已验证照片生成分身；202 返回 `task_id`，同猫进行中任务合并，失败任务可重试 |
 | `GET /tasks/{task_id}` | 只读轮询；须登录并同意当前协议，只能查询本人活跃猫咪的任务。响应为 `task_id`、`type`、`status`、`result`，不返回内部请求载荷 |
 
-认证 POST 使用数据库按来源 IP 固定分钟限流（30 次／分钟），不是上线需要的分布式防滥用方案。任务只由可信业务服务入库；同猫咪、同任务类型、同幂等键的相同载荷只创建一条记录。任务可由 worker 认领，状态为 `pending`、`running`、`succeeded` 或 `failed`；15 分钟的认领租约过期后可再次认领，初次执行加最多两次重试。当前没有公开的任务提交接口或运行中的 AI worker，移动端也尚未接入轮询。
+认证 POST 使用数据库按来源 IP 固定分钟限流（30 次／分钟），不是上线需要的分布式防滥用方案。任务只由可信业务服务入库；同猫咪、同任务类型、同幂等键的相同载荷只创建一条记录。任务可由 worker 认领，状态为 `pending`、`running`、`succeeded` 或 `failed`；15 分钟的认领租约过期后可再次认领，初次执行加最多两次重试。分身提交接口与 arq worker 已接入，移动端按 2 秒轮询并在不可见时暂停；真实 DashScope 生成仍待凭证验收。
 
 ## 验证命令
 
@@ -94,4 +105,13 @@ TASK_TEST_DATABASE_URL="$DATABASE_URL" python -m unittest discover -s tests -p t
 MEDIA_S3_SMOKE=1 python -m unittest discover -s tests -p test_media_storage.py -v
 ```
 
-MySQL 8.4 已验证最新迁移及任务并发去重、认领。网页用真实 API 和模拟对象存储验过切猫、非法照片拒绝与成功上传；实际 S3/MinIO 上传策略、生产 OSS 适配、真实 SMTP、正式协议、iOS/Android 真机及生产队列仍待验收。
+worker 的 Redis 集成与全链路冒烟默认跳过。准备一次性 Redis 与上文 MinIO 测试桶后运行：
+
+```sh
+REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p test_worker.py -v
+E2E_SMOKE=1 REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p test_e2e_smoke.py -v
+```
+
+冒烟覆盖：登录→协议→建档→签名直传 MinIO→复核→提交分身（含幂等合并）→arq worker 生成→轮询到 succeeded 且 7/7 动作就绪。
+
+MySQL 8.4 已验证最新迁移、任务并发去重、认领与失败重排；MinIO 版本化桶已验证上传策略与版本固定；Redis/arq 已验证分发、租约回收与端到端冒烟（fake provider）。生产 OSS 适配、真实 DashScope 生成、真实 SMTP、正式协议、iOS/Android 真机及生产队列仍待验收。
