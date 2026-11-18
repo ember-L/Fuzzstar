@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Base, User
 from app.pets import PetInput, create_pet
-from app.tasks import claim_task, enqueue_task, finish_task
+from app.tasks import claim_task, enqueue_task, finish_task, requeue_task
 
 
 class TaskTests(TestCase):
@@ -99,6 +99,20 @@ class TaskTests(TestCase):
             self.assertFalse(finish_task(db, task_id, 3, {'late': True}, now=now))
             self.assertIsNone(claim_task(db, task_id, now=now))
             self.assertEqual(self.enqueue(db).status, 'failed')
+
+    def test_requeue_resets_only_failed_tasks(self):
+        with Session(self.engine) as db, db.begin():
+            task_id = self.enqueue(db).id
+            for attempt in range(1, 4):
+                self.assertEqual(claim_task(db, task_id), attempt)
+                self.assertTrue(finish_task(db, task_id, attempt))
+            self.assertEqual(self.enqueue(db).status, 'failed')
+            self.assertTrue(requeue_task(db, task_id))
+            saved = self.enqueue(db)
+            self.assertEqual((saved.status, saved.attempts), ('pending', 0))
+            self.assertIsNone(saved.lease_until)
+            self.assertIsNone(saved.result)
+            self.assertFalse(requeue_task(db, task_id))
 
     def test_success_keeps_result_and_prevents_another_claim(self):
         with Session(self.engine) as db, db.begin():

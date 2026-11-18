@@ -10,3 +10,4 @@ PyJWT==2.15.1
 boto3==1.44.5
 Pillow==12.3.0
 pillow-heif==1.8.1
+arq==0.28.0
