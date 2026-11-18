@@ -2,37 +2,26 @@ import { fetch as sendUpload } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import { launchImageLibraryAsync } from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../lib/api';
+import type { PlaceholderManifest } from '../lib/avatar';
 import { PhotoUploadError, uploadPhoto } from '../lib/photo-upload';
 import { ApiError } from '../lib/session';
-import { pollTask, type TaskSnapshot } from '../lib/task-poller';
 import { colors } from '../theme';
+import type { Submission } from './AvatarStage';
 
-type Generation =
-  | { phase: 'polling' | 'failed' | 'timeout'; taskId: string }
-  | { phase: 'ready' | 'unusable'; taskId: string; readyCount: number }
-  | { phase: 'error'; taskId: string; message: string };
-
-export function PhotoUpload({ pet }: { pet: { id: number; name: string } }) {
+export function PhotoUpload({ pet, onSubmitted }: {
+  pet: { id: number; name: string };
+  onSubmitted?: (submission: Submission) => void;
+}) {
   const [photo, setPhoto] = useState<{ file: Blob; name: string }>();
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [generation, setGeneration] = useState<Generation>();
   const [lastMediaId, setLastMediaId] = useState<string>();
   const operation = useRef<AbortController | null>(null);
-  const polling = useRef<AbortController | null>(null);
-  const visible = useRef(true);
-  useEffect(() => {
-    visible.current = AppState.currentState === 'active';
-    const subscription = AppState.addEventListener('change', state => { visible.current = state === 'active'; });
-    return () => {
-      subscription.remove();
-      operation.current?.abort();
-      operation.current = null;
-      polling.current?.abort();
-      polling.current = null;
-    };
+  useEffect(() => () => {
+    operation.current?.abort();
+    operation.current = null;
   }, []);
 
   async function pick() {
@@ -62,37 +51,13 @@ export function PhotoUpload({ pet }: { pet: { id: number; name: string } }) {
     }
   }
 
-  async function trackTask(taskId: string) {
-    polling.current?.abort();
-    const controller = new AbortController();
-    polling.current = controller;
-    setGeneration({ phase: 'polling', taskId });
-    try {
-      const outcome = await pollTask(taskId, 'avatar_batch', {
-        fetchTask: (id, signal) => api.authorized<TaskSnapshot>(`/tasks/${id}`, { signal }),
-        signal: controller.signal,
-        isVisible: () => visible.current,
-      });
-      if (polling.current !== controller || outcome.kind === 'aborted') return;
-      if (outcome.kind === 'timeout') { setGeneration({ phase: 'timeout', taskId }); return; }
-      const task = outcome.task;
-      if (task.status !== 'succeeded') { setGeneration({ phase: 'failed', taskId }); return; }
-      const result = task.result as { usable?: boolean; ready_count?: number } | null;
-      const readyCount = result?.ready_count ?? 0;
-      setGeneration(result?.usable ? { phase: 'ready', taskId, readyCount } : { phase: 'unusable', taskId, readyCount });
-    } catch (error) {
-      if (polling.current !== controller) return;
-      setGeneration({ phase: 'error', taskId, message: error instanceof ApiError ? error.message : '查询生成进度失败，请重试。' });
-    }
-  }
-
   async function submitAvatar(mediaId: string, signal: AbortSignal) {
-    const submitted = await api.authorized<{ task_id: string; status: string }>(`/pets/${pet.id}/avatar`, {
+    const submitted = await api.authorized<{ task_id: string; status: string; placeholder_manifest: PlaceholderManifest }>(`/pets/${pet.id}/avatar`, {
       method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ media_id: mediaId }),
     });
     if (!/^[0-9a-f]{32}$/.test(submitted?.task_id ?? '')) throw new PhotoUploadError('未获得有效的生成任务。');
     setLastMediaId(mediaId);
-    void trackTask(submitted.task_id);
+    onSubmitted?.({ taskId: submitted.task_id, placeholder: submitted.placeholder_manifest });
   }
 
   async function submit() {
@@ -129,9 +94,10 @@ export function PhotoUpload({ pet }: { pet: { id: number; name: string } }) {
     setBusy(true);
     try {
       await submitAvatar(lastMediaId, controller.signal);
+      setMessage('');
     } catch (error) {
       if (operation.current === controller) {
-        setGeneration({ phase: 'error', taskId: generation?.taskId ?? '', message: error instanceof ApiError ? error.message : '重试提交失败，请稍后再试。' });
+        setMessage(error instanceof ApiError ? error.message : '重试提交失败，请稍后再试。');
       }
     } finally {
       if (operation.current === controller) {
@@ -141,13 +107,7 @@ export function PhotoUpload({ pet }: { pet: { id: number; name: string } }) {
     }
   }
 
-  const generationText = !generation ? '' : generation.phase === 'polling' ? '分身生成中，离开页面不会中断，稍后可回来查看。'
-    : generation.phase === 'ready' ? `分身已就绪（${generation.readyCount}/7 个动作）。`
-    : generation.phase === 'unusable' ? `仅 ${generation.readyCount}/7 个动作就绪，暂不可用，可重试生成。`
-    : generation.phase === 'failed' ? '分身生成失败，可重试。'
-    : generation.phase === 'timeout' ? '生成时间较长，后台仍在继续，可稍后重试查询。'
-    : generation.phase === 'error' ? generation.message : '';
-  const canRetry = Boolean(lastMediaId) && generation !== undefined && generation.phase !== 'polling' && generation.phase !== 'ready';
+  const canRetry = Boolean(lastMediaId) && !busy;
 
   return (
     <View style={styles.card}>
@@ -169,7 +129,6 @@ export function PhotoUpload({ pet }: { pet: { id: number; name: string } }) {
         </Pressable> : null}
       </View>
       {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
-      {generationText ? <Text accessibilityLiveRegion="polite" style={styles.note}>{generationText}</Text> : null}
     </View>
   );
 }

@@ -1,6 +1,7 @@
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AvatarStage, type Submission } from '../../components/AvatarStage';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
@@ -11,6 +12,7 @@ export default function HomeScreen() {
   const [pets, setPets] = useState<{ id: number; name: string }[]>([]);
   const [selectedId, setSelectedId] = useState<number>();
   const [loadError, setLoadError] = useState(false);
+  const [submission, setSubmission] = useState<(Submission & { petId: number }) | undefined>();
   const selected = pets.find(pet => pet.id === selectedId) ?? pets[0];
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -45,7 +47,12 @@ export default function HomeScreen() {
           <Text style={styles.heroTitle}>用爱守护{ '\n' }它的每一天</Text>
           <Text style={styles.subtitle}>健康的陪伴{ '\n' }从点滴开始</Text>
         </View>
-        <Image source={require('../../../assets/figma/59f10c90466cfa3aa84c0f88478dccedc8f69565.png')} style={styles.cat} accessibilityLabel="绒星猫咪示意图" />
+        {selected ? (
+          <AvatarStage key={selected.id} pet={selected}
+            submission={submission?.petId === selected.id ? submission : undefined} />
+        ) : (
+          <Image source={require('../../../assets/figma/59f10c90466cfa3aa84c0f88478dccedc8f69565.png')} style={styles.cat} accessibilityLabel="绒星猫咪示意图" />
+        )}
       </View>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{selected ? `${selected.name}的健康状态` : '健康状态'}</Text>
@@ -61,7 +68,8 @@ export default function HomeScreen() {
           </View>
         ))}
       </View>
-      {selected ? <PhotoUpload key={selected.id} pet={selected} /> : null}
+      {selected ? <PhotoUpload key={selected.id} pet={selected}
+        onSubmitted={next => setSubmission({ petId: selected.id, ...next })} /> : null}
       {loadError ? <Text accessibilityLiveRegion="polite" style={styles.note}>暂时无法加载猫咪档案。</Text> : null}
       {!selected ? <Link href="/profile" style={styles.profileLink}>前往「我的」管理猫咪档案</Link> : null}
     </Screen>
