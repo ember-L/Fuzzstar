@@ -1,10 +1,12 @@
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Screen } from '../../../components/Screen';
 import { api } from '../../../lib/api';
 import { DISCLAIMER, STATE_LABELS, stateTone } from '../../../lib/screening';
+import { adviceNotice, shouldPollAdvice, type AdviceView } from '../../../lib/screening-advice';
 import { ApiError } from '../../../lib/session';
+import { pollTask } from '../../../lib/task-poller';
 import { colors } from '../../../theme';
 
 interface ScreeningDetail {
@@ -14,6 +16,7 @@ interface ScreeningDetail {
   media: { media_id: string; type: string }[];
   redline_card: { title: string; subtitle: string; preparation: string[] } | null;
   disclaimer: string; llm_advice: string | null;
+  task_id: string | null; advice: AdviceView | null;
 }
 
 const GRADE_LABELS: Record<string, string> = { observe: '建议观察', vet: '建议就医' };
@@ -38,6 +41,20 @@ export default function ScreeningResultScreen() {
     });
   }, [screeningId]);
   useEffect(() => { load(); }, [load]);
+
+  // 建议未就绪时按 screening_analysis 轮询（60 秒超时），结束后重拉详情取 ready/degraded。
+  const polled = useRef(new Set<string>());
+  useEffect(() => {
+    if (!detail || !shouldPollAdvice(detail) || polled.current.has(detail.task_id!)) return;
+    polled.current.add(detail.task_id!);
+    const controller = new AbortController();
+    void pollTask(detail.task_id!, 'screening_analysis', {
+      fetchTask: id => api.authorized(`/tasks/${id}`),
+      signal: controller.signal,
+      isVisible: () => AppState.currentState === 'active',
+    }).then(outcome => { if (outcome.kind !== 'aborted') load(); }).catch(() => {});
+    return () => controller.abort();
+  }, [detail, load]);
 
   const openMedia = async (mediaId: string) => {
     try {
@@ -113,10 +130,14 @@ export default function ScreeningResultScreen() {
           ))}
         </View>
       ) : null}
-      {detail.llm_advice ? (
+      {detail.advice && (detail.advice.text || detail.advice.status === 'pending') ? (
         <View style={styles.card}>
           <Text style={styles.section}>AI 护理建议</Text>
-          <Text style={styles.body}>{detail.llm_advice}</Text>
+          {adviceNotice(detail.advice) ? <Text style={styles.adviceNotice}>{adviceNotice(detail.advice)}</Text> : null}
+          {detail.advice.text ? <Text style={styles.body}>{detail.advice.text}</Text> : null}
+          {(detail.advice.tips ?? []).map((tip, index) => (
+            <Text key={tip} style={styles.tip}>{`${index + 1}. ${tip}`}</Text>
+          ))}
         </View>
       ) : null}
       <Text style={styles.disclaimer}>{detail.disclaimer || DISCLAIMER}</Text>
@@ -146,6 +167,8 @@ const styles = StyleSheet.create({
   section: { fontSize: 15, fontWeight: '700', color: colors.text },
   symptomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   grade: { fontSize: 13, fontWeight: '600', color: colors.secondary },
+  adviceNotice: { fontSize: 13, lineHeight: 19, color: colors.secondary },
+  tip: { fontSize: 13, lineHeight: 20, color: colors.text },
   link: { fontSize: 14, color: colors.text, textDecorationLine: 'underline', minHeight: 32, paddingVertical: 6 },
   remove: { fontSize: 13, color: '#B3261E', textDecorationLine: 'underline', paddingVertical: 6 },
   disclaimer: { fontSize: 12, lineHeight: 18, color: colors.secondary },
