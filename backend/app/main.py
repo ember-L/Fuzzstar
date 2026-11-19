@@ -11,12 +11,15 @@ from sqlalchemy import create_engine
 from app.auth import APIError, api_error, auth_rate_limit, router
 from app.avatar_api import router as avatar_router
 from app.avatar_assets_api import router as avatar_assets_router
+from app.chat import load_chat_config
+from app.chat_api import router as chat_router
 from app.config_api import router as config_router
 from app.media import PhotoStorage
 from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
 from app.placeholders import load_library
+from app.providers.dashscope import DashScopeLLMProvider
 from app.diet_api import router as diet_router
 from app.weight_api import router as weight_router
 from app.health_api import router as health_router
@@ -70,6 +73,9 @@ def create_dev_app():
     instance.state.triage_rules = load_rules(rules_dir)
     instance.state.advice_templates = load_advice_templates(rules_dir)
     instance.state.feeding_config = load_feeding_config(rules_dir)
+    instance.state.chat_config = load_chat_config(rules_dir)
+    dashscope_key = os.environ.get('DASHSCOPE_API_KEY')
+    instance.state.chat_llm_provider = DashScopeLLMProvider(dashscope_key, model='qwen-plus') if dashscope_key else None
     placeholder_dir = Path(os.environ.get('PLACEHOLDER_DIR') or Path(__file__).resolve().parents[1] / 'assets' / 'placeholders')
     instance.state.placeholder_library = load_library(placeholder_dir)
     instance.get('/api/v1/health')(health)
@@ -84,10 +90,11 @@ def create_dev_app():
     instance.include_router(health_router)
     instance.include_router(diet_router)
     instance.include_router(weight_router)
+    instance.include_router(chat_router)
     instance.middleware('http')(auth_rate_limit)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
-                            allow_headers=['Authorization', 'Content-Type'])
+                            allow_headers=['Authorization', 'Content-Type', 'Idempotency-Key'])
 
     @instance.exception_handler(APIError)
     async def rejected(_request: Request, error: APIError):

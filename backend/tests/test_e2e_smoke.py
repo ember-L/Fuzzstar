@@ -334,6 +334,49 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 after_replay.raise_for_status()
                 self.assertEqual((after_replay.json()['count'], after_replay.json()['total_kcal']), (2, 304.0))
 
+                # T15：文字聊天——线程复用、人设 LLM 回复、红线零 LLM、幂等回放。
+                chat_llm = FakeLLMProvider(reply='{"reply": "喵～我在呢", "emotion": "happy"}')
+                app.state.chat_llm_provider = chat_llm
+                session = await client.post(f'/api/v1/pets/{pet_id}/chat/sessions', headers=headers)
+                self.assertEqual(session.status_code, 201)
+                sid = session.json()['session_id']
+                again = await client.post(f'/api/v1/pets/{pet_id}/chat/sessions', headers=headers)
+                self.assertEqual(again.status_code, 200)
+                self.assertEqual(again.json()['session_id'], sid)
+                chat_key_headers = {**headers, 'Idempotency-Key': 'e2e-chat-key-0001'}
+                sent = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=chat_key_headers,
+                                         json={'kind': 'text', 'content': '团团你在干嘛呀'})
+                self.assertEqual(sent.status_code, 201)
+                self.assertEqual(sent.json()['pet_message']['source'], 'llm')
+                self.assertEqual(sent.json()['pet_message']['emotion_label'], 'happy')
+                self.assertIsNone(sent.json()['guidance'])
+                self.assertEqual(len(chat_llm.calls), 1)
+                replayed = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=chat_key_headers,
+                                             json={'kind': 'text', 'content': '团团你在干嘛呀'})
+                self.assertEqual(replayed.status_code, 201)
+                self.assertEqual(replayed.json()['user_message']['id'], sent.json()['user_message']['id'])
+                self.assertEqual(replayed.headers.get('idempotent-replay'), 'true')
+                self.assertEqual(len(chat_llm.calls), 1)
+                redline = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                            json={'kind': 'text', 'content': '猫咪张口呼吸怎么办'})
+                self.assertEqual(redline.status_code, 201)
+                self.assertEqual(redline.json()['guidance']['title'], '建议立即就医')
+                self.assertEqual(redline.json()['guidance']['route'], 'screening')
+                self.assertEqual(redline.json()['pet_message']['emotion_label'], 'painful')
+                self.assertEqual(len(chat_llm.calls), 1)  # 红线零 LLM
+                messages = await client.get(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                            params={'limit': 4})
+                messages.raise_for_status()
+                items = messages.json()['items']
+                self.assertEqual(len(items), 4)
+                self.assertEqual(items[0]['role'], 'pet')
+                self.assertIsNotNone(messages.json()['next_before'])
+                with Session(worker_engine) as db:
+                    chat_logs = db.scalars(select(AiUsageLog).where(
+                        AiUsageLog.task_id.is_(None), AiUsageLog.kind == 'llm')).all()
+                    self.assertEqual(len(chat_logs), 1)
+                    self.assertEqual((chat_logs[0].tokens_in, chat_logs[0].tokens_out), (100, 30))
+
 
 if __name__ == '__main__':
     unittest.main()
