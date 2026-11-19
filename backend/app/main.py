@@ -18,6 +18,7 @@ from app.media import PhotoStorage
 from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
+from app.quota_api import router as quota_router
 from app.placeholders import load_library
 from app.providers.dashscope import DashScopeLLMProvider
 from app.diet_api import router as diet_router
@@ -91,6 +92,7 @@ def create_dev_app():
     instance.include_router(diet_router)
     instance.include_router(weight_router)
     instance.include_router(chat_router)
+    instance.include_router(quota_router)
     instance.middleware('http')(auth_rate_limit)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],

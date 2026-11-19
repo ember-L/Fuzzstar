@@ -25,6 +25,10 @@ class FakeAssets:
         self.reads.append((media.object_key, media.version_id))
         return self.photo
 
+    async def read_object(self, key, version_id):
+        self.reads.append((key, version_id))
+        return self.objects[key][0]
+
     async def write(self, key, data, content_type):
         version = f'version-{len(self.objects) + 1}'
         self.objects[key] = (data, content_type, version)

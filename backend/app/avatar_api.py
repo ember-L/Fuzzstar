@@ -8,6 +8,7 @@ from app.avatar_assets_api import group_payload, placeholder_base_url, require_l
 from app.media import storage_unavailable
 from app.models import MediaUpload, Pet, Task, User
 from app.pet_api import consented_user, owned_pet
+from app.quota import quota_gate
 from app.tasks import enqueue_task, requeue_task
 
 router = APIRouter(prefix='/api/v1/pets')
@@ -35,6 +36,7 @@ def submit_avatar(data: SubmitAvatar, request: Request, response: Response,
     task = db.scalar(select(Task).where(Task.pet_id == pet_id, Task.type == 'avatar_batch',
                                         Task.status.in_(('pending', 'running'))).order_by(Task.created_at))
     if task is None:
+        quota_gate(db, user.id, 'avatar_gen')  # F11-1：仅新建生成计数，进行中合并不计
         task = enqueue_task(db, pet_id, 'avatar_batch', data.media_id, {'media_id': data.media_id})
         if task.status == 'failed':
             # A user resubmitting a failed generation retries it with a fresh attempt budget.
@@ -44,6 +46,47 @@ def submit_avatar(data: SubmitAvatar, request: Request, response: Response,
     response.headers['Cache-Control'] = 'no-store'
     return {'task_id': task.id, 'status': task.status,
             'placeholder_manifest': group_payload(library, pet.body_type, placeholder_base_url(request))}
+
+
+class ShareGif(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    action: str = Field(max_length=32)
+
+
+@router.post('/{pet_id}/share/gif', status_code=202)
+def share_gif(data: ShareGif, request: Request, response: Response,
+              pet_id: int = Path(gt=0, le=2147483647),
+              user: User = Depends(consented_user), db: Session = Depends(get_db)):
+    """F13-1：选定动作片导出 GIF（仅导出，运行时仍播 MP4）。"""
+    pet = owned_pet(pet_id, user, db)
+    library = require_library(request)
+    if data.action not in library.manifest['actions']:
+        raise APIError(400, 'VALIDATION_ERROR', '请检查请求字段',
+                       {'fields': [{'field': 'action', 'message': '未知动作'}]})
+    avatar = db.scalar(select(Task).where(Task.pet_id == pet_id, Task.type == 'avatar_batch')
+                       .order_by(Task.created_at.desc(), Task.id.desc()))
+    if avatar is None:
+        raise APIError(404, 'NOT_FOUND', '尚未提交分身生成')
+    clip = (avatar.result or {}).get('clips', {}).get(data.action) if avatar.status == 'succeeded' else None
+    if not clip or clip.get('status') != 'ready':
+        raise APIError(409, 'AVATAR_NOT_READY', '该动作分身片尚未就绪，请稍后再试')
+    inflight = db.scalars(select(Task).where(Task.pet_id == pet_id, Task.type == 'gif_export',
+                                             Task.status.in_(('pending', 'running')))).all()
+    for task in inflight:
+        if task.payload.get('action') == data.action:
+            response.status_code = 200
+            response.headers['Cache-Control'] = 'no-store'
+            return {'task_id': task.id, 'status': task.status}
+    task = enqueue_task(db, pet_id, 'gif_export', f'{data.action}:{avatar.id}',
+                        {'avatar_task_id': avatar.id, 'action': data.action,
+                         'clip_key': clip['key'], 'clip_version_id': clip['version_id']})
+    if task.status == 'failed':
+        requeue_task(db, task.id)
+        db.refresh(task)
+    db.commit()
+    response.headers['Cache-Control'] = 'no-store'
+    return {'task_id': task.id, 'status': task.status}
 
 
 @router.get('/{pet_id}/avatar')

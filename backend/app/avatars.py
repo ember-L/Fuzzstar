@@ -34,6 +34,11 @@ class S3Assets:
                                       Key=media.object_key, VersionId=media.version_id)
         return obj['Body'].read()
 
+    async def read_object(self, key: str, version_id: str) -> bytes:
+        obj = await asyncio.to_thread(self.client.get_object, Bucket=self.bucket,
+                                      Key=key, VersionId=version_id)
+        return obj['Body'].read()
+
     async def write(self, key: str, data: bytes, content_type: str) -> str:
         response = await asyncio.to_thread(self.client.put_object, Bucket=self.bucket,
                                            Key=key, Body=data, ContentType=content_type)

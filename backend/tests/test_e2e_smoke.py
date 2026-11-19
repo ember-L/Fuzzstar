@@ -30,7 +30,9 @@ from app.auth import utcnow
 from app.avatars import ACTIONS, S3Assets
 from app.chat import load_chat_config
 from app.identity import create_email_account, verify_email
-from app.models import AiUsageLog, Base
+from app.media import PhotoStorage
+from app.models import AiUsageLog, Base, DeletionJob, MediaUpload, Pet, Task, User
+from app.privacy import purge_due
 from app.providers.fake import FakeAudioProvider, FakeImageProvider, FakeLLMProvider, FakeVideoProvider
 from app.triage import load_rules
 
@@ -496,6 +498,110 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                                                     json={'kind': 'text', 'content': '还能聊天吗'})
                 self.assertEqual(text_after_fail.status_code, 201)
                 self.assertEqual(text_after_fail.json()['pet_message']['source'], 'llm')
+
+                # T17：配额热调→429「明日再试」+红线豁免；plans/entitlement 只读；training 单独授权。
+                with patch.dict(os.environ, {'QUOTA_SCREENING': '1', 'QUOTA_AVATAR': '1', 'QUOTA_CHAT': '1'}):
+                    blocked_screen = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers,
+                                                       json={'spirit': 'normal', 'appetite': 'normal'})
+                    self.assertEqual(blocked_screen.status_code, 429)
+                    self.assertEqual(blocked_screen.json()['code'], 'QUOTA_EXCEEDED')
+                    self.assertIn('明日再试', blocked_screen.json()['message'])
+                    redline_ok = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers,
+                                                   json={'spirit': 'normal', 'appetite': 'normal',
+                                                         'redline_options': ['open_mouth_breathing']})
+                    self.assertEqual(redline_ok.status_code, 201)
+                    self.assertEqual(redline_ok.json()['state'], 'urgent')
+                    blocked_avatar = await client.post(f'/api/v1/pets/{pet_id}/avatar', headers=headers,
+                                                       json={'media_id': media_id})
+                    self.assertEqual(blocked_avatar.status_code, 429)
+                    blocked_chat = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                                     json={'kind': 'text', 'content': '配额用完了吗'})
+                    self.assertEqual(blocked_chat.status_code, 429)
+                    quota_view = await client.get('/api/v1/quota', headers=headers)
+                    quota_view.raise_for_status()
+                    self.assertEqual(quota_view.json()['metrics']['screening']['limit'], 1)
+                plans = await client.get('/api/v1/plans', headers=headers)
+                plans.raise_for_status()
+                self.assertEqual({p['code'] for p in plans.json()['items']}, {'free', 'pro'})
+                entitlement = await client.get('/api/v1/me/entitlement', headers=headers)
+                entitlement.raise_for_status()
+                self.assertEqual((entitlement.json()['plan'], entitlement.json()['message']), ('free', '测试期免费'))
+                training_on = await client.post('/api/v1/consents/training', headers=headers, json={'granted': True})
+                self.assertEqual(training_on.status_code, 200)
+                self.assertTrue(training_on.json()['training_granted'])
+                training_off = await client.post('/api/v1/consents/training', headers=headers, json={'granted': False})
+                self.assertFalse(training_off.json()['training_granted'])
+
+                # T17：GIF 导出——202+同动作合并→worker ffmpeg 水印转码→签名下载 GIF89a 480p。
+                gif_sent = await client.post(f'/api/v1/pets/{pet_id}/share/gif', headers=headers,
+                                             json={'action': 'idle'})
+                self.assertEqual(gif_sent.status_code, 202)
+                gif_task = gif_sent.json()['task_id']
+                gif_merge = await client.post(f'/api/v1/pets/{pet_id}/share/gif', headers=headers,
+                                              json={'action': 'idle'})
+                self.assertEqual(gif_merge.status_code, 200)
+                self.assertEqual(gif_merge.json()['task_id'], gif_task)
+
+                # e2e 的 avatar 片是 fake 字节；GIF 转码需要真实视频——用占位库 idle 片替换该对象版本。
+                real_clip = (Path(__file__).resolve().parents[1] / 'assets' / 'placeholders' / 'standard' / 'idle.mp4').read_bytes()
+                gif_storage = PhotoStorage.from_env()
+                with Session(worker_engine) as db, db.begin():
+                    avatar_row = db.get(Task, task_id)
+                    clip_key = avatar_row.result['clips']['idle']['key']
+                put = gif_storage.client.put_object(Bucket=gif_storage.bucket, Key=clip_key,
+                                                    Body=real_clip, ContentType='video/mp4')
+                with Session(worker_engine) as db, db.begin():
+                    gif_row = db.get(Task, gif_task)
+                    gif_row.payload = {**gif_row.payload, 'clip_version_id': put['VersionId']}
+
+                async def on_startup_gif(ctx):
+                    ctx['engine'] = worker_engine
+                    ctx['assets'] = S3Assets.from_env()
+
+                pool5 = await create_pool(settings)
+                await worker.sweep({'engine': worker_engine, 'redis': pool5})
+                runner5 = Worker([worker.run_task], redis_settings=settings, redis_pool=pool5,
+                                 max_tries=1, burst=True, poll_delay=0.05, on_startup=on_startup_gif)
+                await runner5.async_run()
+                await pool5.aclose()
+                gif_after = await client.get(f'/api/v1/tasks/{gif_task}', headers=headers)
+                gif_after.raise_for_status()
+                self.assertEqual(gif_after.json()['status'], 'succeeded')
+                gif_url = gif_after.json()['download_url']
+                self.assertTrue(gif_url)
+                async with httpx.AsyncClient() as storage:
+                    gif_bytes = (await storage.get(gif_url, timeout=15)).content
+                self.assertEqual(gif_bytes[:6], b'GIF89a')
+                self.assertEqual(Image.open(io.BytesIO(gif_bytes)).size[1], 480)
+
+                # T17：注销→冻结登录→幂等 200→到期 purge 物理清除（含 OSS），审计仅匿名统计。
+                user_id = (await client.get('/api/v1/me', headers=headers)).json()['id']
+                deleted = await client.delete('/api/v1/me', headers=headers)
+                self.assertEqual(deleted.status_code, 202)
+                purge_after = deleted.json()['purge_after']
+                deleted_again = await client.delete('/api/v1/me', headers=headers)
+                self.assertEqual(deleted_again.status_code, 200)
+                self.assertEqual(deleted_again.json()['purge_after'], purge_after)
+                frozen_login = await client.post('/api/v1/auth/login',
+                                                 json={'email': 'e2e@example.com', 'password': 'Strong123'})
+                self.assertEqual(frozen_login.status_code, 401)
+                frozen_me = await client.get('/api/v1/me', headers=headers)
+                self.assertEqual(frozen_me.status_code, 401)
+                with Session(worker_engine) as db, db.begin():
+                    job = db.scalar(select(DeletionJob).where(DeletionJob.user_id == user_id))
+                    job.purge_after = utcnow() - timedelta(minutes=1)
+                storage = PhotoStorage.from_env()
+                purged = await asyncio.to_thread(purge_due, worker_engine, storage=storage, now=utcnow())
+                self.assertEqual(purged, [user_id])
+                with Session(worker_engine) as db:
+                    self.assertIsNone(db.get(User, user_id))
+                    self.assertIsNone(db.get(Pet, pet_id))
+                    self.assertEqual(db.scalars(select(MediaUpload)).all(), [])
+                    anonymous = db.scalars(select(AiUsageLog).where(AiUsageLog.user_id.is_(None))).all()
+                    self.assertGreater(len(anonymous), 0)
+                from botocore.exceptions import ClientError
+                with self.assertRaises(ClientError):
+                    storage.client.head_object(Bucket=storage.bucket, Key=f'photos/{pet_id}/{media_id}')
 
 
 if __name__ == '__main__':

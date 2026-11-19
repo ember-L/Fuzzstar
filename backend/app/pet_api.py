@@ -88,6 +88,23 @@ def consented_user(request: Request, user: User = Depends(current_user), db: Ses
     return user
 
 
+class TrainingConsent(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    granted: bool
+
+
+@router.post('/consents/training')
+def set_training_consent(data: TrainingConsent, request: Request, response: Response,
+                         user: User = Depends(consented_user), db: Session = Depends(get_db)):
+    # F12-3：单独弹窗授权，默认 false；拒绝不影响任何功能；v1 无训练数据读取路径。
+    version = request.app.state.policy_versions['privacy']
+    grant_consent(db, user.id, 'training', version, data.granted)
+    db.commit()
+    response.headers['Cache-Control'] = 'no-store'
+    return {'training_granted': data.granted}
+
+
 def owned_pet(pet_id: int, user: User = Depends(consented_user), db: Session = Depends(get_db)):
     try:
         return get_pet(db, user.id, pet_id)

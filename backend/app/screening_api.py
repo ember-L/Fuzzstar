@@ -13,6 +13,7 @@ from app.auth import APIError, get_db, utcnow
 from app.media import storage_unavailable
 from app.models import HealthEvent, HealthScreening, MediaUpload, Pet, ScreeningMedia, ScreeningSymptom, Task, User
 from app.pet_api import consented_user, owned_pet
+from app.quota import quota_gate
 from app.tasks import enqueue_task
 from app.triage import RulesBundle, symptoms_config, triage, validate_answers
 
@@ -130,6 +131,9 @@ def submit_screening(data: ScreeningInput, request: Request, response: Response,
     if photos > 3 or videos > 1:
         raise APIError(400, 'VALIDATION_ERROR', '请检查存证媒体', {'fields': [{'field': 'media_ids', 'message': '照片最多 3 张、视频最多 1 条'}]})
     result = triage(bundle, answers)
+    if not result['redline_hit']:
+        # F11-1：红线初筛不计配额；普通初筛原子计数，超限 429。
+        quota_gate(db, user.id, 'screening')
     screening = HealthScreening(pet_id=pet.id, user_id=user.id, state=result['state'], redline_hit=result['redline_hit'],
                                 spirit=data.spirit, appetite=data.appetite, rules_version=result['rules_version'],
                                 triage_json={'redlines': result['redlines'], 'symptom_grades': result['symptom_grades']})

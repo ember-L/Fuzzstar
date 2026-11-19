@@ -18,6 +18,7 @@ from app.idempotency import find_replay, hash_request, validate_key
 from app.models import (AiUsageLog, ChatMessage, ChatSession, HealthScreening, MediaUpload, Pet,
                         RequestIdempotency, Task, User)
 from app.pet_api import consented_user, owned_pet
+from app.quota import quota_gate
 from app.tasks import enqueue_task
 
 router = APIRouter(prefix='/api/v1', tags=['chat'])
@@ -184,6 +185,7 @@ async def send_message(sid: int, body: MessageInput, request: Request, response:
     if not content or len(content) > config['input_max']:
         raise APIError(400, 'VALIDATION_ERROR', '请检查请求字段',
                        {'fields': [{'field': 'content', 'message': f'消息需为 1–{config["input_max"]} 字'}]})
+    quota_gate(db, user.id, 'chat_msg')  # F11-1：文字消息计数；音频解读与幂等回放不计
     user_message = ChatMessage(session_id=session.id, role='user', kind='text', content=content)
     db.add(user_message)
     db.flush()

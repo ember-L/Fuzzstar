@@ -19,8 +19,10 @@ from app.audio import interpret_audio
 from app.auth import utcnow
 from app.chat import load_chat_config
 from app.avatars import S3Assets, generate_avatar
+from app.gif import export_gif
 from app.idempotency import IDEMPOTENCY_TTL
 from app.models import MediaUpload, RequestIdempotency, Task
+from app.privacy import purge_due
 from app.tasks import MAX_ATTEMPTS, claim_task, finish_task
 from app.triage import load_rules
 
@@ -61,6 +63,8 @@ async def run_task(ctx, task_id):
             result = await interpret_audio(ctx['engine'], task, audio_provider=ctx.get('audio_provider'),
                                            llm_provider=ctx['llm_provider'], assets=ctx['assets'],
                                            chat_config=ctx['chat_config'])
+        elif task.type == 'gif_export':
+            result = await export_gif(task, assets=ctx['assets'])
         else:
             raise ValueError(f'unsupported task type: {task.type}')
     except Exception:
@@ -98,6 +102,11 @@ async def sweep(ctx):
         await ctx['redis'].enqueue_job('run_task', task_id, _job_id=f'rongxing-task:{task_id}')
 
 
+async def purge_sweep(ctx):
+    # F12-4: physically purge accounts whose 15-day grace period elapsed.
+    await asyncio.to_thread(purge_due, ctx['engine'], storage=ctx.get('assets'), now=utcnow())
+
+
 def _providers_from_env():
     from app.providers.dashscope import DashScopeImageProvider, DashScopeLLMProvider, DashScopeVideoProvider
     key = os.environ.get('DASHSCOPE_API_KEY', '')
@@ -133,7 +142,7 @@ async def shutdown(ctx):
 
 class WorkerSettings:
     functions = [run_task]
-    cron_jobs = [cron(sweep, second=set(range(0, 60, 5)))]
+    cron_jobs = [cron(sweep, second=set(range(0, 60, 5))), cron(purge_sweep, second={0})]
     on_startup = startup
     on_shutdown = shutdown
     max_tries = 1  # the retry budget lives in the DB attempts column

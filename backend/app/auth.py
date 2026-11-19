@@ -19,6 +19,7 @@ from app.identity import (
 )
 from app.mail_worker import verification_token
 from app.models import AuthSession, RefreshToken, User, UserCredential, VerificationMail
+from app.privacy import request_deletion
 from app.sessions import create_session, rotate_refresh_token
 
 class APIError(Exception):
@@ -234,8 +235,8 @@ def refresh(data: RefreshInput, request: Request, response: Response, db: Sessio
     return pair
 
 
-def current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-                 db: Session = Depends(get_db)) -> User:
+def _authenticate(request: Request, credentials: Optional[HTTPAuthorizationCredentials],
+                  db: Session, statuses: tuple[str, ...], *, allow_revoked: bool = False) -> User:
     unauthorized = APIError(401, 'AUTH_REQUIRED', '请重新登录')
     if credentials is None:
         raise unauthorized
@@ -248,15 +249,37 @@ def current_user(request: Request, credentials: Optional[HTTPAuthorizationCreden
         raise unauthorized from exc
     if type(claims['sid']) is not int or not 0 < claims['sid'] < 2**63:
         raise unauthorized
-    user = db.scalar(select(User).join(AuthSession, AuthSession.user_id == User.id).where(
-        AuthSession.id == claims['sid'], AuthSession.revoked_at.is_(None), User.status == 'active',
-    ))
+    conditions = [AuthSession.id == claims['sid'], User.status.in_(statuses)]
+    if not allow_revoked:
+        conditions.append(AuthSession.revoked_at.is_(None))
+    user = db.scalar(select(User).join(AuthSession, AuthSession.user_id == User.id).where(*conditions))
     if user is None or str(user.id) != claims['sub']:
         raise unauthorized
     return user
+
+
+def current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+                 db: Session = Depends(get_db)) -> User:
+    return _authenticate(request, credentials, db, ('active',))
+
+
+def deletion_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+                  db: Session = Depends(get_db)) -> User:
+    # A frozen account may still repeat its own deletion request (idempotent 200).
+    return _authenticate(request, credentials, db, ('active', 'deletion_pending'), allow_revoked=True)
 
 
 @router.get('/me')
 def me(response: Response, user: User = Depends(current_user)):
     response.headers['Cache-Control'] = 'no-store'
     return {'id': user.id, 'nickname': user.nickname}
+
+
+@router.delete('/me', status_code=202)
+def delete_me(response: Response, user: User = Depends(deletion_user), db: Session = Depends(get_db)):
+    job, created = request_deletion(db, user.id, now=datetime.now(timezone.utc).replace(tzinfo=None))
+    db.commit()
+    if not created:
+        response.status_code = 200
+    response.headers['Cache-Control'] = 'no-store'
+    return {'status': job.status, 'purge_after': job.purge_after.isoformat()}
