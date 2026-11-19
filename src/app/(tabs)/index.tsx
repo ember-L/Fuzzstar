@@ -133,15 +133,27 @@ export default function HomeScreen() {
             <Text style={styles.subtitle}>暂无记录</Text>
           </View>
         )}
-        <View style={styles.summary}>
-          <Text style={styles.summaryTitle}>最新体重</Text>
-          {health?.latest_weight ? (
-            <>
-              <Text style={styles.summaryValue}>{health.latest_weight.weight_kg} kg</Text>
-              <Text style={styles.subtitle}>{formatDateTime(health.latest_weight.measured_at)}</Text>
-            </>
-          ) : <Text style={styles.subtitle}>暂无记录</Text>}
-        </View>
+        {selected ? (
+          <Link href={'/weight/' + selected.id} style={styles.summary}>
+            <Text style={styles.summaryTitle}>最新体重</Text>
+            {health?.latest_weight ? (
+              <>
+                <Text style={styles.summaryValue}>{health.latest_weight.weight_kg} kg</Text>
+                <Text style={styles.subtitle}>{formatDateTime(health.latest_weight.measured_at)}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.subtitle}>暂无记录</Text>
+                <Text style={styles.subtitle}>点击记一笔</Text>
+              </>
+            )}
+          </Link>
+        ) : (
+          <View style={styles.summary}>
+            <Text style={styles.summaryTitle}>最新体重</Text>
+            <Text style={styles.subtitle}>暂无记录</Text>
+          </View>
+        )}
         {selected ? (
           <Link href={'/screening/history/' + selected.id} style={styles.summary}>
             <Text style={styles.summaryTitle}>最近初筛</Text>

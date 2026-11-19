@@ -5,6 +5,7 @@ import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
 import { STATE_LABELS, stateTone } from '../../lib/screening';
 import { dietTimeline, type DietRecord } from '../../lib/diet';
+import { weightTimeline, type WeightRecord } from '../../lib/weight';
 import { formatClock, groupByLocalDay, mergeTimeline, screeningTimeline, type DayGroup } from '../../lib/timeline';
 import { colors } from '../../theme';
 
@@ -16,12 +17,13 @@ export default function TimelineScreen() {
   const [groups, setGroups] = useState<DayGroup[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const load = useCallback(() => {
-    // 初筛与饮食按本地自然日混排；体重（T13）交付后在此加入。
+    // 初筛、饮食与体重按本地自然日倒序混排（F06-1）。
     Promise.all([
       api.authorized<{ items: { screening_id: number; state: string; redline_hit: boolean; created_at: string }[] }>(`/pets/${petId}/screenings?limit=50`),
       api.authorized<{ items: DietRecord[] }>(`/pets/${petId}/diet?limit=50`),
-    ]).then(([screenings, diet]) => {
-      const items = mergeTimeline(screeningTimeline(screenings.items), dietTimeline(Number(petId), diet.items));
+      api.authorized<{ records: WeightRecord[] }>(`/pets/${petId}/weights?limit=50`),
+    ]).then(([screenings, diet, weights]) => {
+      const items = mergeTimeline(screeningTimeline(screenings.items), dietTimeline(Number(petId), diet.items), weightTimeline(Number(petId), weights.records));
       setGroups(groupByLocalDay(items, new Date()));
       setLoadFailed(false);
     }).catch(() => setLoadFailed(true));
@@ -30,7 +32,7 @@ export default function TimelineScreen() {
   return (
     <Screen>
       <Text accessibilityRole="header" style={styles.title}>健康时间线</Text>
-      <Text style={styles.subtitle}>初筛与饮食记录按日倒序；体重记录将在后续版本加入。</Text>
+      <Text style={styles.subtitle}>初筛、饮食与体重记录按日倒序混排。</Text>
       {groups === null ? (
         loadFailed ? (
           <Pressable accessibilityRole="button" style={styles.primary} onPress={load}><Text style={styles.primaryText}>重试</Text></Pressable>
