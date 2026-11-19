@@ -1,6 +1,6 @@
 # 绒星项目
 
-绒星 App 目前可在本地联调邮箱账号、协议同意、多猫档案、照片上传、分身生成任务（arq worker + 移动端轮询）与首页分身播放（占位首帧 → 个人 idle 片）。产品与设计参考见 [项目规划与设计参考](项目规划与设计参考.md)，交付范围与进度见 [全栈任务规划](docs/superpowers/plans/2026-11-17-rongxing-full-stack.md)。
+绒星 App 目前可在本地联调邮箱账号、协议同意、多猫档案、照片上传、分身生成任务（arq worker + 移动端轮询）、首页分身播放（占位首帧 → 个人 idle 片）与健康初筛（版本化规则硬判定 + 红线紧急分流 + 存证）。产品与设计参考见 [项目规划与设计参考](项目规划与设计参考.md)，交付范围与进度见 [全栈任务规划](docs/superpowers/plans/2026-11-17-rongxing-full-stack.md)。
 
 ## 本地运行
 
@@ -34,8 +34,8 @@ uvicorn app.main:create_dev_app --factory --host 127.0.0.1
 
 使用启用了**版本控制**的 S3 兼容私有桶。配置 `MEDIA_S3_ENDPOINT`、`MEDIA_S3_BUCKET`、`MEDIA_S3_ACCESS_KEY`、`MEDIA_S3_SECRET_KEY`（必须同时提供）以及可选 `MEDIA_S3_REGION`（默认 `us-east-1`）。地址应由 API 和上传客户端共同可达；仅本机测试允许 `http://127.0.0.1` 或 `http://localhost`，其余使用 HTTPS。未配置时其他业务可用，上传返回 `503 MEDIA_UNAVAILABLE`。网页直传需要桶的 CORS 允许对应的前端源发起 POST／GET；不要开启公共读取，也不要记录签名 URL。
 
-1. `POST /api/v1/media/presign` 提交 `pet_id`、`content_type`、`size_bytes`，返回 `media_id` 和 `{upload: {url, fields}}`。支持 JPG、PNG、HEIC，单张 ≤10 MiB。将 `fields` 原样加入 multipart 表单，再将 `file` 作为最后一个字段向 `upload.url` 发起 POST；不向对象存储发送 API 的 Bearer 令牌。
-2. 在 10 分钟内调用 `POST /api/v1/media/{media_id}/complete`。API 复核对象字节数及类型、解码图片并限制为单帧和最多 2500 万像素；首次通过后固定对象的 `VersionId`。重复上传不能替换已验证的版本。
+1. `POST /api/v1/media/presign` 提交 `pet_id`、`content_type`、`size_bytes` 和可选 `kind`（`photo` 默认／`video`），返回 `media_id` 和 `{upload: {url, fields}}`。照片支持 JPG、PNG、HEIC，单张 ≤10 MiB；视频支持 MP4、MOV，单段 ≤50 MiB。将 `fields` 原样加入 multipart 表单，再将 `file` 作为最后一个字段向 `upload.url` 发起 POST；不向对象存储发送 API 的 Bearer 令牌。
+2. 在 10 分钟内调用 `POST /api/v1/media/{media_id}/complete`。API 复核对象字节数及类型：照片解码并限制为单帧和最多 2500 万像素；视频用 ffprobe 校验含视频流且时长 ≤30 秒（部署环境需要 ffmpeg）。首次通过后固定对象的 `VersionId`。重复上传不能替换已验证的版本。
 3. `GET /api/v1/media/{media_id}` 仅对归属当前账号活跃猫咪的已验证照片签发 60 分钟下载链接。已签发的链接在到期前仍可访问，请视作临时凭证。后续业务应使用 `media_id` 并再次校验其归属和已验证版本，不接受客户端传入的任意媒体 URL。
 
 照片验证通过后，`POST /api/v1/pets/{pet_id}/avatar` 提交 `media_id` 即可创建分身生成任务（202 返回 `task_id` 和按猫咪体型选择的 `placeholder_manifest`）；同猫已有进行中任务时合并返回同一 `task_id`，失败任务可用同一照片重试。猫咪档案支持 `body_type`（slim/standard/chubby，默认 standard），决定占位片分组。过期未验证票据由 worker 在到期 1 小时后清理；被引用的对象版本按 `VersionId` 保留，不要把通用“删除非当前版本”策略直接用于此桶。视频／音频与单猫主体判定仍待后续需求。
@@ -62,7 +62,16 @@ API 启动时加载占位库（可用 `PLACEHOLDER_DIR` 覆盖路径）与动作
 
 `GET /api/v1/pets/{pet_id}/avatar` 返回最近一次分身任务的状态、占位清单，以及成功后底图与各动作片的 60 分钟签名播放地址（失败动作标记 failed，由客户端回退占位）；从未提交过返回 404。
 
-### 6. 移动端 / 网页
+### 6. 健康初筛
+
+初筛为纯规则硬判定，不调用 LLM。规则包随仓库保存在 `backend/rules`（可用 `RULES_DIR` 覆盖）：`symptoms.yaml`（sx-2026-11-19，15 项症状、时长／频次分档、精神食欲选项与单独就医触发）、`redlines.yaml`（rl-2026-11-19，6 类红线含「呕吐 >24h」派生判定）、`scoring.yaml`（sc-2026-11-19，observe −10／vet −30／urgent −60）。规则缺失或非法时相关接口返回 `503 CONFIG_UNAVAILABLE`。
+
+- `GET /api/v1/config/symptoms` 下发版本化问卷配置（选项、分档、追问适用项、红线选项）。
+- `POST /api/v1/pets/{pet_id}/screenings` 提交精神／食欲（必答）、症状多选及追问（时长必填，适用项频次必填，严重度开关与 ≤255 字备注）、红线选项与存证 `media_ids`。缺项返回 `400 VALIDATION_ERROR` 并在 `detail.fields` 定位错误项；存证照片 ≤3 张、视频 ≤1 段，须同猫已验证媒体。命中红线立即返回 `urgent` 与就医准备清单（附录 F 文案），零 LLM、不受配额限制；非红线按规则分级（单症状按追问，多症状取最高；明显沉郁或拒食单独就医）。
+- 每次提交存档答案、症状、`rules_version` 与判定快照（`triage_json`），同版本规则结果可复现；非 normal 结果写入健康事件（扣分供 T08 健康分聚合）。`GET /api/v1/screenings/{id}` 回看详情，`GET /api/v1/pets/{id}/screenings` 分页历史，`DELETE /api/v1/screenings/{id}/media/{media_id}` 删除存证（仍被其他记录或分身任务引用时只删关联，保留对象版本）。
+- LLM 护理建议、异步任务与降级模板属 T10，当前 `llm_advice` 为空。
+
+### 7. 移动端 / 网页
 
 需要 Node.js 和 npm。在 `mobile` 目录执行：
 
@@ -74,7 +83,7 @@ npm run web
 
 Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机网页；真机需要可达的开发 API 地址，发布版只接受 HTTPS。原生端通过 SecureStore 保存刷新令牌；网页仅在内存保留会话，刷新页面需重新登录。「在此设备退出登录」仅清理本机令牌，不吊销服务端会话。
 
-「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片并中断轮询；照片验证后自动提交分身生成，首页舞台立即播放该体型的占位首帧（无需额外请求），随后每 2 秒轮询任务状态，页面不可见时暂停，10 分钟超时后停止轮询并提示（后台任务继续）。生成成功后个人片在下一个待机循环边界淡入替换占位片（300ms 淡出/淡入，动作播放中途不切换）；失败、超时或不足 5/7 动作时给出可理解的提示，并可在上传卡片「重试生成」。首页播放器按版本化动作映射（`GET /config/action-map`，本地缓存并按版本比对，挂载/回到前台/每 60 秒刷新）驱动：健康状态持续待机、情绪与点按/长按一次性动作播完回待机；单动作缺失或播放损坏逐级回退 个人片→占位片→静态底图呼吸缩放，断网无缓存不白屏。视频文件按内容版本缓存于本机（expo-sqlite 索引 + 文件系统，LRU 默认上限 200 MB）；网页端走浏览器 HTTP 缓存。健康与聊聊仍是占位（健康联动输入已预留，待 T08 接线）；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。真机播放观感与缓存命中仍待设备验收。
+「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片并中断轮询；照片验证后自动提交分身生成，首页舞台立即播放该体型的占位首帧（无需额外请求），随后每 2 秒轮询任务状态，页面不可见时暂停，10 分钟超时后停止轮询并提示（后台任务继续）。生成成功后个人片在下一个待机循环边界淡入替换占位片（300ms 淡出/淡入，动作播放中途不切换）；失败、超时或不足 5/7 动作时给出可理解的提示，并可在上传卡片「重试生成」。首页播放器按版本化动作映射（`GET /config/action-map`，本地缓存并按版本比对，挂载/回到前台/每 60 秒刷新）驱动：健康状态持续待机、情绪与点按/长按一次性动作播完回待机；单动作缺失或播放损坏逐级回退 个人片→占位片→静态底图呼吸缩放，断网无缓存不白屏。视频文件按内容版本缓存于本机（expo-sqlite 索引 + 文件系统，LRU 默认上限 200 MB）；网页端走浏览器 HTTP 缓存。「健康」页提供初筛入口：按猫开始问卷（动态追问、缺项定位、紧急信号勾选、照片／视频存证选择与上传），提交后展示规则结果、红线就医清单与免责声明，并可回看历史与删除存证。聊聊仍是占位；首页健康联动输入已预留，待 T08 接线；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。真机播放观感与缓存命中仍待设备验收。
 
 ## 本地 API 范围
 
@@ -87,12 +96,16 @@ Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机�
 | `GET /me` | Bearer JWT；读取当前账号 |
 | `GET/POST /consents` | 读取协议链接及版本 / 同意当前版本；训练授权默认关闭，不提供设置入口 |
 | `GET/POST /pets`、`GET/PATCH/DELETE /pets/{id}` | 须登录并同意当前协议；最多 5 只活跃猫咪；删除为软删；档案含 `body_type`（slim/standard/chubby） |
-| `POST /media/presign`、`POST /media/{id}/complete`、`GET /media/{id}` | 本地照片上传签名、验证与版本化下载；须已登录、同意当前协议且拥有活跃猫咪 |
+| `POST /media/presign`、`POST /media/{id}/complete`、`GET /media/{id}` | 照片／视频上传签名、验证与版本化下载（`kind` 区分，视频 ≤50 MiB／30 秒）；须已登录、同意当前协议且拥有活跃猫咪 |
 | `POST /pets/{id}/avatar` | 提交已验证照片生成分身；202 返回 `task_id` 与按体型选择的 `placeholder_manifest`，同猫进行中任务合并，失败任务可重试 |
 | `GET /pets/{id}/avatar` | 最近一次分身任务状态与结果；成功后底图/动作片为 60 分钟签名地址，失败动作标记 failed；从未提交返回 404 |
 | `GET /avatar/placeholder-manifest` | 版本化占位清单（3 体型 × 7 动作）；须登录并同意当前协议 |
 | `GET /avatar/placeholders/{version}/{body_type}/{action}.mp4` | 占位片公开读取；版本化路径 immutable 缓存，白名单外 404 |
 | `GET /config/action-map` | 版本化动作映射（FRD 附录 C）；须登录并同意当前协议 |
+| `GET /config/symptoms` | 版本化初筛问卷配置（症状／分档／红线选项）；须登录并同意当前协议 |
+| `POST /pets/{id}/screenings` | 提交初筛：规则硬判定，201 返回状态／分级／红线卡／免责声明；缺项 400 定位错误项 |
+| `GET /screenings/{id}`、`GET /pets/{id}/screenings` | 初筛详情回看与历史（limit ≤50）；仅本人活跃猫咪 |
+| `DELETE /screenings/{id}/media/{media_id}` | 删除存证关联；无其他引用时连同对象版本删除 |
 | `GET /tasks/{task_id}` | 只读轮询；须登录并同意当前协议，只能查询本人活跃猫咪的任务。响应为 `task_id`、`type`、`status`、`result`，不返回内部请求载荷 |
 
 认证 POST 使用数据库按来源 IP 固定分钟限流（30 次／分钟），不是上线需要的分布式防滥用方案。任务只由可信业务服务入库；同猫咪、同任务类型、同幂等键的相同载荷只创建一条记录。任务可由 worker 认领，状态为 `pending`、`running`、`succeeded` 或 `failed`；15 分钟的认领租约过期后可再次认领，初次执行加最多两次重试。分身提交接口与 arq worker 已接入，移动端按 2 秒轮询并在不可见时暂停；真实 DashScope 生成仍待凭证验收。
@@ -128,6 +141,6 @@ REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p te
 E2E_SMOKE=1 REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p test_e2e_smoke.py -v
 ```
 
-冒烟覆盖：登录→协议→建档→签名直传 MinIO→复核→提交分身（含幂等合并与占位清单）→占位片公开下载→动作映射→arq worker 生成→轮询到 succeeded 且 7/7 动作就绪→分身读取接口与签名播放地址下载。
+冒烟覆盖：登录→协议→建档→签名直传 MinIO→复核→提交分身（含幂等合并与占位清单）→占位片公开下载→动作映射→arq worker 生成→轮询到 succeeded 且 7/7 动作就绪→分身读取接口与签名播放地址下载→初筛（缺项定位、呕吐 >24h 派生红线 urgent＋就医卡、normal 无卡、详情／历史回看、存证删除的引用保护）。
 
-MySQL 8.4 已验证最新迁移（含 body_type）、任务并发去重、认领与失败重排；MinIO 版本化桶已验证上传策略与版本固定；Redis/arq 已验证分发、租约回收与端到端冒烟（fake provider）；占位片库 21 条已按规格验收（h264/720p/无声/≤5s/首尾对齐）。生产 OSS 适配、真实 DashScope 生成、授权占位素材与 Figma 对照、真实 SMTP、正式协议、iOS/Android 真机及生产队列仍待验收。
+MySQL 8.4 已验证最新迁移（含 body_type 与初筛四表）、任务并发去重、认领与失败重排；MinIO 版本化桶已验证上传策略与版本固定；Redis/arq 已验证分发、租约回收与端到端冒烟（fake provider）；占位片库 21 条已按规格验收（h264/720p/无声/≤5s/首尾对齐）；初筛规则 22 项单测覆盖附录 A 分级表与附录 B 全部红线，视频存证经 ffprobe 双校验。生产 OSS 适配、真实 DashScope 生成、授权占位素材与 Figma 对照、真实 SMTP、正式协议、兽医评审、iOS/Android 真机及生产队列仍待验收。

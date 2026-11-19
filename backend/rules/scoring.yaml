@@ -1,0 +1,4 @@
+# 附录 D 健康分扣分默认权重（FRD.md:287-297）。score_delta 存正数扣分。
+version: sc-2026-11-19
+deltas: {observe: 10, vet: 30, urgent: 60}
+decay: {observe_hours: 72}

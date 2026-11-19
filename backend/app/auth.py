@@ -22,8 +22,9 @@ from app.models import AuthSession, RefreshToken, User, UserCredential, Verifica
 from app.sessions import create_session, rotate_refresh_token
 
 class APIError(Exception):
-    def __init__(self, status: int, code: str, message: str):
+    def __init__(self, status: int, code: str, message: str, detail: dict | None = None):
         self.status, self.code, self.message = status, code, message
+        self.detail = detail or {}
 
 
 router = APIRouter(prefix='/api/v1')
@@ -50,11 +51,11 @@ class TokenPair(BaseModel):
     expires_in: int = 1800
 
 
-def api_error(status: int, code: str, message: str):
+def api_error(status: int, code: str, message: str, detail: dict | None = None):
     headers = {'Cache-Control': 'no-store'}
     if status == 401:
         headers['WWW-Authenticate'] = 'Bearer'
-    return JSONResponse({'code': code, 'message': message, 'detail': {}}, status_code=status, headers=headers)
+    return JSONResponse({'code': code, 'message': message, 'detail': detail or {}}, status_code=status, headers=headers)
 
 
 def auth_required():

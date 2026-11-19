@@ -1,0 +1,38 @@
+# 附录 B 红线清单（FRD.md:254-267）。命中任一即 urgent，硬规则 bypass LLM、不受配额限制。
+# 派生规则与显式勾选同等效力，最先执行。
+version: rl-2026-11-19
+redlines:
+  - code: resp_distress
+    label: 呼吸困难
+    options:
+      - {code: open_mouth_breathing, label: 张口呼吸}
+      - {code: abdominal_breathing, label: 明显腹式呼吸}
+      - {code: rapid_resting_breathing, label: 静息呼吸急促}
+  - code: seizure
+    label: 抽搐/意识丧失
+    options:
+      - {code: convulsions, label: 抽搐}
+      - {code: paddling_movements, label: 划水样动作}
+      - {code: brief_unconsciousness, label: 短暂意识丧失}
+  - code: urine_block
+    label: 尿闭嫌疑（公猫尤其提示）
+    options:
+      - {code: frequent_litter_no_urine, label: 频繁蹲砂盆无尿}
+      - {code: painful_urination_crying, label: 排尿嚎叫疼痛}
+  - code: vomiting_persistent
+    label: 持续呕吐
+    derived: {symptom: vomiting, duration: ['>24h']}
+  - code: poison_suspect
+    label: 毒物接触嫌疑
+    options:
+      - {code: lily, label: 百合接触}
+      - {code: human_medication, label: 人用药物接触}
+      - {code: chocolate, label: 巧克力接触}
+      - {code: xylitol, label: 木糖醇接触}
+      - {code: other_toxin, label: 其他可疑毒物接触}
+  - code: trauma_bleeding
+    label: 外伤/活动性出血
+    options:
+      - {code: fall_from_height, label: 高处坠落}
+      - {code: car_accident, label: 车祸}
+      - {code: persistent_bleeding, label: 持续出血}

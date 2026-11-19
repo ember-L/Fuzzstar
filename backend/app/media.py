@@ -1,6 +1,10 @@
 import io
+import json
 import os
+import subprocess
+import tempfile
 from contextlib import closing
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import boto3
@@ -14,9 +18,12 @@ from app.models import MediaUpload
 
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_PHOTO_PIXELS = 25_000_000
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_VIDEO_SECONDS = 30
 UPLOAD_SECONDS = 600
 DOWNLOAD_SECONDS = 3600
 FORMATS = {'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/heic': 'HEIF'}
+VIDEO_FORMATS = {'video/mp4', 'video/quicktime'}
 register_heif_opener(thumbnails=False)
 
 
@@ -78,7 +85,7 @@ class PhotoStorage:
         try:
             head = self.client.head_object(**ref)
             if head['ContentLength'] != photo.size_bytes or head.get('ContentType') != photo.content_type:
-                raise APIError(422, 'MEDIA_INVALID', '照片类型或大小与申请不一致')
+                raise APIError(422, 'MEDIA_INVALID', '媒体类型或大小与申请不一致')
             version = head.get('VersionId')
             if not version or version == 'null' or len(version) > 1024:
                 raise storage_unavailable()
@@ -86,13 +93,46 @@ class PhotoStorage:
                 data = body.read(photo.size_bytes + 1)
         except ClientError as exc:
             if exc.response.get('ResponseMetadata', {}).get('HTTPStatusCode') == 404:
-                raise APIError(409, 'MEDIA_NOT_UPLOADED', '尚未收到照片，请先上传') from exc
+                raise APIError(409, 'MEDIA_NOT_UPLOADED', '尚未收到媒体文件，请先上传') from exc
             raise storage_unavailable() from exc
         except BotoCoreError as exc:
             raise storage_unavailable() from exc
-        if len(data) != photo.size_bytes or not valid_photo(data, photo.content_type):
-            raise APIError(422, 'MEDIA_INVALID', '照片格式无效或像素超限')
+        if photo.kind == 'video':
+            valid = valid_video(data, photo.content_type)
+            message = '视频无效或超过 30 秒'
+        else:
+            valid = valid_photo(data, photo.content_type)
+            message = '照片格式无效或像素超限'
+        if len(data) != photo.size_bytes or not valid:
+            raise APIError(422, 'MEDIA_INVALID', message)
         return version
+
+
+def valid_video(data: bytes, content_type: str) -> bool:
+    """ffprobe 复核：可解码、含视频流、时长 ≤30 秒（FRD F05-7）。部署需要 ffmpeg。"""
+    if content_type not in VIDEO_FORMATS:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / 'probe.mp4'
+        target.write_bytes(data)
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', str(target)],
+                capture_output=True, timeout=30,
+            )
+        except FileNotFoundError as exc:
+            raise storage_unavailable() from exc
+        except subprocess.TimeoutExpired:
+            return False
+    if probe.returncode != 0:
+        return False
+    try:
+        info = json.loads(probe.stdout)
+        duration = float(info.get('format', {}).get('duration', 0))
+        streams = [stream.get('codec_type') for stream in info.get('streams', [])]
+    except (ValueError, TypeError):
+        return False
+    return 0 < duration <= MAX_VIDEO_SECONDS and 'video' in streams
 
 
 def valid_photo(data: bytes, content_type: str) -> bool:

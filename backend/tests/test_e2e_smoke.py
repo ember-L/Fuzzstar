@@ -156,6 +156,45 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                         pass
                     await pool.aclose()
 
+                # T09 初筛：规则硬判定、红线卡、存档回看与存证删除（引用保护）。
+                config = await client.get('/api/v1/config/symptoms', headers=headers)
+                config.raise_for_status()
+                self.assertEqual(config.json()['version'], 'sx-2026-11-19')
+                invalid = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers,
+                                            json={'appetite': 'normal', 'symptoms': []})
+                self.assertEqual(invalid.status_code, 400)
+                self.assertEqual(invalid.json()['code'], 'VALIDATION_ERROR')
+                self.assertIn('spirit', [f['field'] for f in invalid.json()['detail']['fields']])
+                screening = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers, json={
+                    'spirit': 'normal', 'appetite': 'normal',
+                    'symptoms': [{'code': 'vomiting', 'duration': '>24h', 'frequency': '2-3'}],
+                    'redline_options': [], 'media_ids': [media_id]})
+                self.assertEqual(screening.status_code, 201)
+                record = screening.json()
+                self.assertEqual(record['state'], 'urgent')
+                self.assertTrue(record['redline_hit'])
+                self.assertIn('vomiting_persistent', record['redlines'])
+                self.assertEqual(record['redline_card']['title'], '建议立即就医')
+                self.assertEqual(record['disclaimer'], 'AI 结果仅供日常健康管理参考,不替代专业兽医诊断')
+                detail = await client.get(f"/api/v1/screenings/{record['screening_id']}", headers=headers)
+                detail.raise_for_status()
+                self.assertEqual(detail.json()['state'], 'urgent')
+                self.assertEqual(detail.json()['media'][0]['media_id'], media_id)
+                history = await client.get(f'/api/v1/pets/{pet_id}/screenings', headers=headers)
+                history.raise_for_status()
+                self.assertEqual(history.json()['items'][0]['screening_id'], record['screening_id'])
+                normal = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers, json={
+                    'spirit': 'normal', 'appetite': 'normal', 'symptoms': [], 'redline_options': [], 'media_ids': []})
+                self.assertEqual(normal.status_code, 201)
+                self.assertEqual(normal.json()['state'], 'normal')
+                self.assertIsNone(normal.json()['redline_card'])
+                removed = await client.delete(
+                    f"/api/v1/screenings/{record['screening_id']}/media/{media_id}", headers=headers)
+                self.assertEqual(removed.status_code, 204)
+                # 照片仍被分身任务引用：只删关联，对象版本保留。
+                still = await client.get(f'/api/v1/media/{media_id}', headers=headers)
+                self.assertEqual(still.status_code, 200)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,7 +17,9 @@ from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
 from app.placeholders import load_library
+from app.screening_api import router as screening_router
 from app.task_api import router as task_router
+from app.triage import load_rules
 
 
 def health():
@@ -60,6 +62,7 @@ def create_dev_app():
     instance.state.photo_storage = PhotoStorage.from_env()
     rules_dir = Path(os.environ.get('RULES_DIR') or Path(__file__).resolve().parents[1] / 'rules')
     instance.state.action_map = load_action_map(rules_dir)
+    instance.state.triage_rules = load_rules(rules_dir)
     placeholder_dir = Path(os.environ.get('PLACEHOLDER_DIR') or Path(__file__).resolve().parents[1] / 'assets' / 'placeholders')
     instance.state.placeholder_library = load_library(placeholder_dir)
     instance.get('/api/v1/health')(health)
@@ -70,6 +73,7 @@ def create_dev_app():
     instance.include_router(task_router)
     instance.include_router(media_router)
     instance.include_router(config_router)
+    instance.include_router(screening_router)
     instance.middleware('http')(auth_rate_limit)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
@@ -77,7 +81,7 @@ def create_dev_app():
 
     @instance.exception_handler(APIError)
     async def rejected(_request: Request, error: APIError):
-        return api_error(error.status, error.code, error.message)
+        return api_error(error.status, error.code, error.message, error.detail)
 
     @instance.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, _error: RequestValidationError):
