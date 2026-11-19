@@ -15,7 +15,9 @@ from sqlalchemy import create_engine, delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
+from app.audio import interpret_audio
 from app.auth import utcnow
+from app.chat import load_chat_config
 from app.avatars import S3Assets, generate_avatar
 from app.idempotency import IDEMPOTENCY_TTL
 from app.models import MediaUpload, RequestIdempotency, Task
@@ -55,6 +57,10 @@ async def run_task(ctx, task_id):
         elif task.type == 'screening_analysis':
             result = await analyze_screening(ctx['engine'], task, llm_provider=ctx['llm_provider'],
                                              templates=ctx['advice_templates'], rules=ctx.get('triage_rules'))
+        elif task.type == 'audio_interpret':
+            result = await interpret_audio(ctx['engine'], task, audio_provider=ctx.get('audio_provider'),
+                                           llm_provider=ctx['llm_provider'], assets=ctx['assets'],
+                                           chat_config=ctx['chat_config'])
         else:
             raise ValueError(f'unsupported task type: {task.type}')
     except Exception:
@@ -113,6 +119,12 @@ async def startup(ctx):
         raise RuntimeError('advice_templates.yaml is required for screening fallback')
     ctx['advice_templates'] = templates
     ctx['triage_rules'] = load_rules(rules_dir)
+    chat_config = load_chat_config(rules_dir)
+    if chat_config is None:
+        raise RuntimeError('chat.yaml is required for audio interpretation')
+    ctx['chat_config'] = chat_config
+    from app.providers.dashscope import DashScopeAudioProvider
+    ctx['audio_provider'] = DashScopeAudioProvider(os.environ['DASHSCOPE_API_KEY'])
 
 
 async def shutdown(ctx):

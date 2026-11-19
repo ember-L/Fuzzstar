@@ -8,6 +8,16 @@ class GeneratedAsset:
     content_type: str
 
 
+@dataclass(frozen=True)
+class EmotionResult:
+    emotion: str
+    confidence: float
+
+
+class AudioProvider(Protocol):
+    async def interpret(self, audio_url: str, prompt: str) -> EmotionResult: ...
+
+
 class ImageProvider(Protocol):
     async def edit(self, photo: bytes, prompt: str) -> GeneratedAsset: ...
 

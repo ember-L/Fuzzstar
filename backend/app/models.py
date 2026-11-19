@@ -129,7 +129,7 @@ class MediaUpload(Base):
 
     @property
     def object_key(self) -> str:
-        prefix = 'videos' if self.kind == 'video' else 'photos'
+        prefix = 'videos' if self.kind == 'video' else 'audio' if self.kind == 'audio' else 'photos'
         return f'{prefix}/{self.pet_id}/{self.id}'
 
 

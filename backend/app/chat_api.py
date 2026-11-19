@@ -6,7 +6,7 @@
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,9 +15,10 @@ from app.auth import APIError, get_db, utcnow
 from app.chat import (build_persona_messages, detect_redline, fallback_reply,
                       parse_chat_reply, redline_response)
 from app.idempotency import find_replay, hash_request, validate_key
-from app.models import (AiUsageLog, ChatMessage, ChatSession, HealthScreening, Pet,
-                        RequestIdempotency, User)
+from app.models import (AiUsageLog, ChatMessage, ChatSession, HealthScreening, MediaUpload, Pet,
+                        RequestIdempotency, Task, User)
 from app.pet_api import consented_user, owned_pet
+from app.tasks import enqueue_task
 
 router = APIRouter(prefix='/api/v1', tags=['chat'])
 
@@ -30,22 +31,78 @@ def chat_config(request: Request) -> dict:
 
 
 class MessageInput(BaseModel, extra='forbid'):
-    kind: Literal['text'] = 'text'
-    content: str
+    kind: Literal['text', 'audio'] = 'text'
+    content: Optional[str] = None
+    media_id: Optional[str] = Field(None, pattern=r'^[0-9a-f]{32}$')
 
 
 def _session_payload(session: ChatSession) -> dict:
     return {'session_id': session.id, 'pet_id': session.pet_id, 'created_at': session.created_at.isoformat()}
 
 
-def _message_payload(message: ChatMessage, source: Optional[str] = None) -> dict:
+def _signed_audio_url(request: Request, db: Session, object_key: Optional[str]) -> Optional[str]:
+    if not object_key:
+        return None
+    storage = getattr(request.app.state, 'photo_storage', None)
+    if storage is None:
+        return None
+    media = db.get(MediaUpload, object_key.rsplit('/', 1)[-1])
+    if media is None or media.version_id is None:
+        return None
+    return storage.asset_url(media.object_key, media.version_id)
+
+
+def _message_payload(message: ChatMessage, source: Optional[str] = None, *,
+                     request: Optional[Request] = None, db: Optional[Session] = None) -> dict:
+    audio_url = message.audio_url
+    if message.kind == 'audio' and request is not None and db is not None:
+        audio_url = _signed_audio_url(request, db, audio_url)
     payload = {'id': message.id, 'role': message.role, 'kind': message.kind, 'content': message.content,
+               'audio_url': audio_url,
                'emotion_label': message.emotion_label,
                'emotion_confidence': float(message.emotion_confidence) if message.emotion_confidence is not None else None,
                'task_id': message.task_id, 'created_at': message.created_at.isoformat()}
     if source is not None:
         payload['source'] = source
     return payload
+
+
+def _send_audio(session: ChatSession, body: MessageInput, request: Request, response: Response,
+                user: User, db: Session) -> dict:
+    """F09-3：音频消息→202 入队 audio_interpret；同音频进行中任务合并（重试防重）。"""
+    if not body.media_id or body.content is not None:
+        raise APIError(400, 'VALIDATION_ERROR', '请检查请求字段',
+                       {'fields': [{'field': 'media_id', 'message': '音频消息需提供 media_id，且不带 content'}]})
+    media = db.scalar(select(MediaUpload).join(Pet, Pet.id == MediaUpload.pet_id).where(
+        MediaUpload.id == body.media_id, MediaUpload.pet_id == session.pet_id,
+        Pet.user_id == user.id, Pet.status == 'active'))
+    if media is None:
+        raise APIError(404, 'NOT_FOUND', '未找到音频上传记录')
+    if media.kind != 'audio':
+        raise APIError(422, 'MEDIA_INVALID', '该消息仅支持音频文件')
+    if media.version_id is None:
+        raise APIError(409, 'MEDIA_NOT_VERIFIED', '请先上传并确认音频')
+    inflight = db.scalars(select(Task).where(Task.pet_id == session.pet_id, Task.type == 'audio_interpret',
+                                             Task.status.in_(('pending', 'running')))
+                          .order_by(Task.created_at, Task.id)).all()
+    for task in inflight:
+        if task.payload.get('media_id') == media.id:
+            message = db.get(ChatMessage, task.payload.get('message_id'))
+            response.status_code = 200
+            response.headers['Cache-Control'] = 'no-store'
+            return {'task_id': task.id, 'user_message': _message_payload(message, request=request, db=db),
+                    'pet_message': None, 'guidance': None}
+    message = ChatMessage(session_id=session.id, role='user', kind='audio', audio_url=media.object_key)
+    db.add(message)
+    db.flush()
+    task = enqueue_task(db, session.pet_id, 'audio_interpret', str(message.id),
+                        {'media_id': media.id, 'message_id': message.id, 'session_id': session.id})
+    message.task_id = task.id
+    db.commit()
+    response.status_code = 202
+    response.headers['Cache-Control'] = 'no-store'
+    return {'task_id': task.id, 'user_message': _message_payload(message, request=request, db=db),
+            'pet_message': None, 'guidance': None}
 
 
 def _owned_session(sid: int, user: User, db: Session) -> ChatSession:
@@ -99,6 +156,8 @@ async def send_message(sid: int, body: MessageInput, request: Request, response:
                        user: User = Depends(consented_user), db: Session = Depends(get_db),
                        config: dict = Depends(chat_config)):
     session = _owned_session(sid, user, db)
+    if body.kind == 'audio':
+        return _send_audio(session, body, request, response, user, db)
     # F09-6：离线补发带同一 Idempotency-Key；命中缓存直接回放，不产生重复消息。
     key = validate_key(request.headers.get('Idempotency-Key'))
     request_hash = hash_request(request.url.path, body.model_dump(mode='json')) if key else None
@@ -121,7 +180,7 @@ async def send_message(sid: int, body: MessageInput, request: Request, response:
             response.headers['Cache-Control'] = 'no-store'
             response.headers['Idempotent-Replay'] = 'true'
             return replay
-    content = body.content.strip()
+    content = (body.content or '').strip()
     if not content or len(content) > config['input_max']:
         raise APIError(400, 'VALIDATION_ERROR', '请检查请求字段',
                        {'fields': [{'field': 'content', 'message': f'消息需为 1–{config["input_max"]} 字'}]})
@@ -186,5 +245,5 @@ def list_messages(sid: int, request: Request, response: Response,
         query = query.where(ChatMessage.id < before)
     items = db.scalars(query.order_by(ChatMessage.id.desc()).limit(limit)).all()
     response.headers['Cache-Control'] = 'no-store'
-    return {'items': [_message_payload(m) for m in items],
+    return {'items': [_message_payload(m, request=request, db=db) for m in items],
             'next_before': items[-1].id if len(items) == limit else None}

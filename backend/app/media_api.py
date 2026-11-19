@@ -8,8 +8,8 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.auth import APIError, get_db, utcnow
-from app.media import (DOWNLOAD_SECONDS, FORMATS, MAX_PHOTO_BYTES, MAX_VIDEO_BYTES, UPLOAD_SECONDS,
-                       VIDEO_FORMATS, storage_unavailable)
+from app.media import (AUDIO_FORMATS, DOWNLOAD_SECONDS, FORMATS, MAX_AUDIO_BYTES, MAX_PHOTO_BYTES,
+                       MAX_VIDEO_BYTES, UPLOAD_SECONDS, VIDEO_FORMATS, storage_unavailable)
 from app.models import MediaUpload, Pet, User
 from app.pet_api import consented_user, owned_pet
 
@@ -20,7 +20,7 @@ class PresignPhoto(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     pet_id: int = Field(strict=True, gt=0, le=2147483647)
-    kind: Literal['photo', 'video'] = 'photo'
+    kind: Literal['photo', 'video', 'audio'] = 'photo'
     content_type: str = Field(max_length=64)
     size_bytes: int = Field(strict=True)
 
@@ -32,6 +32,9 @@ def presign_photo(data: PresignPhoto, request: Request, response: Response,
     if data.kind == 'video':
         if data.content_type not in VIDEO_FORMATS or not 0 < data.size_bytes <= MAX_VIDEO_BYTES:
             raise APIError(422, 'MEDIA_INVALID', '仅支持 50 MiB 以内的 MP4 或 MOV 视频')
+    elif data.kind == 'audio':
+        if data.content_type not in AUDIO_FORMATS or not 0 < data.size_bytes <= MAX_AUDIO_BYTES:
+            raise APIError(422, 'MEDIA_INVALID', '仅支持 10 MiB 以内的 M4A、MP3、WAV 或 WebM 音频')
     elif data.content_type not in FORMATS or not 0 < data.size_bytes <= MAX_PHOTO_BYTES:
         raise APIError(422, 'MEDIA_INVALID', '仅支持 10 MiB 以内的 JPG、PNG 或 HEIC 照片')
     storage = request.app.state.photo_storage

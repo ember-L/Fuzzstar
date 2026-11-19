@@ -24,6 +24,10 @@ UPLOAD_SECONDS = 600
 DOWNLOAD_SECONDS = 3600
 FORMATS = {'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/heic': 'HEIF'}
 VIDEO_FORMATS = {'video/mp4', 'video/quicktime'}
+AUDIO_FORMATS = {'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/mpeg', 'audio/wav', 'audio/webm'}
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+MIN_AUDIO_SECONDS = 1
+MAX_AUDIO_SECONDS = 60
 register_heif_opener(thumbnails=False)
 
 
@@ -100,6 +104,9 @@ class PhotoStorage:
         if photo.kind == 'video':
             valid = valid_video(data, photo.content_type)
             message = '视频无效或超过 30 秒'
+        elif photo.kind == 'audio':
+            valid = valid_audio(data, photo.content_type)
+            message = '音频无效或时长不在 1–60 秒'
         else:
             valid = valid_photo(data, photo.content_type)
             message = '照片格式无效或像素超限'
@@ -133,6 +140,33 @@ def valid_video(data: bytes, content_type: str) -> bool:
     except (ValueError, TypeError):
         return False
     return 0 < duration <= MAX_VIDEO_SECONDS and 'video' in streams
+
+
+def valid_audio(data: bytes, content_type: str) -> bool:
+    """ffprobe 复核：可解码、含音频流、时长 1–60 秒（FRD F09-3）。部署需要 ffmpeg。"""
+    if content_type not in AUDIO_FORMATS:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / 'probe.audio'
+        target.write_bytes(data)
+        try:
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', str(target)],
+                capture_output=True, timeout=30,
+            )
+        except FileNotFoundError as exc:
+            raise storage_unavailable() from exc
+        except subprocess.TimeoutExpired:
+            return False
+    if probe.returncode != 0:
+        return False
+    try:
+        info = json.loads(probe.stdout)
+        duration = float(info.get('format', {}).get('duration', 0))
+        streams = [stream.get('codec_type') for stream in info.get('streams', [])]
+    except (ValueError, TypeError):
+        return False
+    return MIN_AUDIO_SECONDS <= duration <= MAX_AUDIO_SECONDS and 'audio' in streams
 
 
 def valid_photo(data: bytes, content_type: str) -> bool:

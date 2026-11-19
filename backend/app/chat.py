@@ -45,13 +45,29 @@ def load_chat_config(directory: Path) -> Optional[dict]:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f'{key} must be non-empty')
         # 免责文案本身含「诊断」一词（边界声明），禁词检查只约束回复模板。
-        for key in ('fallback_reply', 'redline_reply'):
+        for key in ('fallback_reply', 'redline_reply', 'audio_fallback_reply'):
             if any(word in data[key] for word in FORBIDDEN_WORDS):
                 raise ValueError(f'{key}: forbidden word')
+        threshold = data['audio_confidence_threshold']
+        if not isinstance(threshold, (int, float)) or not 0 < threshold <= 1:
+            raise ValueError('audio_confidence_threshold must be in (0, 1]')
+        for key in ('audio_min_seconds', 'audio_max_seconds'):
+            if not isinstance(data[key], int) or data[key] <= 0:
+                raise ValueError(f'{key} must be a positive integer')
+        if data['audio_min_seconds'] >= data['audio_max_seconds']:
+            raise ValueError('audio_min_seconds must be below audio_max_seconds')
+        for key in ('unrecognized_label', 'audio_footer', 'audio_fallback_reply'):
+            value = data[key]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f'{key} must be non-empty')
         return {'version': version, 'context_window': data['context_window'],
                 'input_max': data['input_max'], 'reply_max': data['reply_max'],
                 'disclaimer': data['disclaimer'], 'redline_keywords': list(keywords),
-                'fallback_reply': data['fallback_reply'], 'redline_reply': data['redline_reply']}
+                'fallback_reply': data['fallback_reply'], 'redline_reply': data['redline_reply'],
+                'audio_confidence_threshold': float(threshold),
+                'audio_min_seconds': data['audio_min_seconds'], 'audio_max_seconds': data['audio_max_seconds'],
+                'unrecognized_label': data['unrecognized_label'], 'audio_footer': data['audio_footer'],
+                'audio_fallback_reply': data['audio_fallback_reply']}
     except Exception as exc:
         raise RuntimeError(f'Invalid chat config: {path}') from exc
 
@@ -60,8 +76,7 @@ def detect_redline(text: str, config: dict) -> bool:
     return any(keyword in text for keyword in config['redline_keywords'])
 
 
-def build_persona_messages(pet: dict, screening_state: Optional[str], history: list[dict], config: dict) -> list[dict]:
-    """system 人设 + 最近上下文（history 已按窗口截取，role=user/pet）。"""
+def pet_profile_lines(pet: dict) -> list[str]:
     profile = [f"名字:{pet['name']}", f"种类:{pet.get('species') or 'cat'}"]
     if pet.get('breed'):
         profile.append(f"品种:{pet['breed']}")
@@ -71,10 +86,19 @@ def build_persona_messages(pet: dict, screening_state: Optional[str], history: l
     profile.append('已绝育' if pet.get('neutered') else '未绝育')
     if pet.get('body_type'):
         profile.append(f"体型:{_BODY_LABELS.get(pet['body_type'], pet['body_type'])}")
+    return profile
+
+
+def persona_tone(screening_state: Optional[str]) -> str:
     if screening_state in _SICK_STATES:
-        tone = '你最近身体不适(最新初筛提示需要关注),回复要体现不舒服、蔫蔫的语气,可以提到自己没精神或肚子不舒服,但绝不能说出具体病名或做医学判断。'
-    else:
-        tone = '你最近状态不错,回复活泼亲人。'
+        return '你最近身体不适(最新初筛提示需要关注),回复要体现不舒服、蔫蔫的语气,可以提到自己没精神或肚子不舒服,但绝不能说出具体病名或做医学判断。'
+    return '你最近状态不错,回复活泼亲人。'
+
+
+def build_persona_messages(pet: dict, screening_state: Optional[str], history: list[dict], config: dict) -> list[dict]:
+    """system 人设 + 最近上下文（history 已按窗口截取，role=user/pet）。"""
+    profile = pet_profile_lines(pet)
+    tone = persona_tone(screening_state)
     system = (
         f"你扮演一只宠物猫,以第一人称和主人撒娇聊天。档案:{'、'.join(profile)}。{tone}"
         f"只聊日常陪伴与感受,不做诊断、不开处方、不推荐药物;回复严禁出现「确诊」「治疗」「诊断」字样。"

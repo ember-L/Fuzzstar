@@ -5,10 +5,11 @@ image URL; the fake providers cover the local pipeline until then.
 """
 import asyncio
 import base64
+import json
 
 import httpx
 
-from app.providers.base import GeneratedAsset
+from app.providers.base import EmotionResult, GeneratedAsset
 
 DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1'
 
@@ -69,6 +70,41 @@ class DashScopeLLMProvider:
             usage = data.get('usage') or {}
             self.last_usage = {'tokens_in': usage.get('input_tokens'), 'tokens_out': usage.get('output_tokens')}
             return content
+
+
+class DashScopeAudioProvider:
+    """qwen2-audio 情绪解读（F09-3）。外部未验证：需 DASHSCOPE_API_KEY 与可达音频 URL。"""
+
+    provider = 'dashscope'
+
+    def __init__(self, api_key: str, model: str = 'qwen2-audio-instruct', timeout: float = 60, transport=None):
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+        self.transport = transport
+        self.last_usage: dict | None = None
+
+    async def interpret(self, audio_url: str, prompt: str) -> EmotionResult:
+        payload = {'model': self.model,
+                   'input': {'messages': [{'role': 'user', 'content': [{'audio': audio_url}, {'text': prompt}]}]},
+                   'parameters': {'result_format': 'message'}}
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
+            response = await client.post(f'{DASHSCOPE_BASE}/services/aigc/multimodal-generation/generation',
+                                         json=payload, headers={'Authorization': f'Bearer {self.api_key}'})
+            data = response.json()
+            if response.status_code != 200:
+                raise DashScopeError(f'audio interpret failed: {data}')
+            try:
+                parts = data['output']['choices'][0]['message']['content']
+                text = next(part['text'] for part in parts if 'text' in part)
+                parsed = json.loads(text.strip())
+                emotion = parsed['emotion']
+                confidence = float(parsed['confidence'])
+            except (KeyError, IndexError, TypeError, ValueError, StopIteration) as exc:
+                raise DashScopeError(f'audio interpret returned no usable result: {data}') from exc
+            usage = data.get('usage') or {}
+            self.last_usage = {'tokens_in': usage.get('input_tokens'), 'tokens_out': usage.get('output_tokens')}
+            return EmotionResult(emotion, confidence)
 
 
 class DashScopeVideoProvider:

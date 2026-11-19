@@ -11,6 +11,7 @@ import asyncio
 import io
 import os
 import unittest
+import wave
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -27,9 +28,10 @@ from app import main, worker
 from app.advice import load_advice_templates
 from app.auth import utcnow
 from app.avatars import ACTIONS, S3Assets
+from app.chat import load_chat_config
 from app.identity import create_email_account, verify_email
 from app.models import AiUsageLog, Base
-from app.providers.fake import FakeImageProvider, FakeLLMProvider, FakeVideoProvider
+from app.providers.fake import FakeAudioProvider, FakeImageProvider, FakeLLMProvider, FakeVideoProvider
 from app.triage import load_rules
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
@@ -376,6 +378,124 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                         AiUsageLog.task_id.is_(None), AiUsageLog.kind == 'llm')).all()
                     self.assertEqual(len(chat_logs), 1)
                     self.assertEqual((chat_logs[0].tokens_in, chat_logs[0].tokens_out), (100, 30))
+
+                # T16：录音解读——presign 上传→202 异步→同音频合并→worker 解读→情绪气泡+签名播放。
+                audio_buffer = io.BytesIO()
+                with wave.open(audio_buffer, 'wb') as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(8000)
+                    wav.writeframes(b'\x00\x00' * 8000)
+                audio_payload = audio_buffer.getvalue()
+                audio_ticket = await client.post('/api/v1/media/presign', headers=headers, json={
+                    'pet_id': pet_id, 'kind': 'audio', 'content_type': 'audio/wav',
+                    'size_bytes': len(audio_payload)})
+                self.assertEqual(audio_ticket.status_code, 201)
+                audio_media_id = audio_ticket.json()['media_id']
+                audio_upload = audio_ticket.json()['upload']
+                async with httpx.AsyncClient() as storage:
+                    audio_up = await storage.post(audio_upload['url'], data=audio_upload['fields'],
+                                                  files={'file': ('meow.wav', audio_payload, 'audio/wav')}, timeout=15)
+                self.assertIn(audio_up.status_code, (200, 204))
+                audio_complete = await client.post(f'/api/v1/media/{audio_media_id}/complete', headers=headers)
+                audio_complete.raise_for_status()
+                self.assertEqual(audio_complete.json()['status'], 'verified')
+                audio_sent = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                               json={'kind': 'audio', 'media_id': audio_media_id})
+                self.assertEqual(audio_sent.status_code, 202)
+                audio_task = audio_sent.json()['task_id']
+                self.assertIsNone(audio_sent.json()['pet_message'])
+                self.assertTrue(audio_sent.json()['user_message']['audio_url'].startswith('http://127.0.0.1:9000/'))
+                audio_merged = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                                 json={'kind': 'audio', 'media_id': audio_media_id})
+                self.assertEqual(audio_merged.status_code, 200)
+                self.assertEqual(audio_merged.json()['task_id'], audio_task)
+
+                audio_llm = FakeLLMProvider(reply='{"reply": "喵～我听到啦", "emotion": "happy"}')
+
+                async def on_startup_audio(ctx):
+                    ctx['engine'] = worker_engine
+                    ctx['assets'] = S3Assets.from_env()
+                    ctx['audio_provider'] = FakeAudioProvider()
+                    ctx['llm_provider'] = audio_llm
+                    ctx['chat_config'] = load_chat_config(RULES_DIR)
+
+                pool3 = await create_pool(settings)
+                await worker.sweep({'engine': worker_engine, 'redis': pool3})
+                runner3 = Worker([worker.run_task], redis_settings=settings, redis_pool=pool3,
+                                 max_tries=1, burst=True, poll_delay=0.05, on_startup=on_startup_audio)
+                await runner3.async_run()
+                await pool3.aclose()
+                audio_after = await client.get(f'/api/v1/tasks/{audio_task}', headers=headers)
+                audio_after.raise_for_status()
+                self.assertEqual(audio_after.json()['status'], 'succeeded')
+                audio_result = audio_after.json()['result']
+                self.assertEqual((audio_result['emotion'], audio_result['confidence'], audio_result['uncertain']),
+                                 ('happy', 0.82, False))
+                audio_messages = await client.get(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                                  params={'limit': 2})
+                audio_messages.raise_for_status()
+                pet_bubble = audio_messages.json()['items'][0]
+                self.assertEqual(pet_bubble['role'], 'pet')
+                self.assertEqual(pet_bubble['content'], '喵～我听到啦')
+                self.assertEqual((pet_bubble['emotion_label'], pet_bubble['emotion_confidence']), ('happy', 0.82))
+                self.assertEqual(pet_bubble['task_id'], audio_task)
+                async with httpx.AsyncClient() as storage:
+                    played = await storage.get(audio_sent.json()['user_message']['audio_url'], timeout=15)
+                self.assertEqual(played.status_code, 200)
+                self.assertEqual(played.content, audio_payload)
+                with Session(worker_engine) as db:
+                    audio_logs = db.scalars(select(AiUsageLog).where(AiUsageLog.task_id == audio_task)).all()
+                    self.assertEqual(sorted(log.kind for log in audio_logs), ['audio', 'llm'])
+                    audio_log = next(log for log in audio_logs if log.kind == 'audio')
+                    self.assertEqual((audio_log.tokens_in, audio_log.tokens_out), (60, 20))
+
+                # T16/AC-09-4：解读失败→未识别+通用安抚，文字聊天仍可用。
+                fail_ticket = await client.post('/api/v1/media/presign', headers=headers, json={
+                    'pet_id': pet_id, 'kind': 'audio', 'content_type': 'audio/wav',
+                    'size_bytes': len(audio_payload)})
+                self.assertEqual(fail_ticket.status_code, 201)
+                fail_media_id = fail_ticket.json()['media_id']
+                fail_upload = fail_ticket.json()['upload']
+                async with httpx.AsyncClient() as storage:
+                    fail_up = await storage.post(fail_upload['url'], data=fail_upload['fields'],
+                                                 files={'file': ('meow.wav', audio_payload, 'audio/wav')}, timeout=15)
+                self.assertIn(fail_up.status_code, (200, 204))
+                fail_complete = await client.post(f'/api/v1/media/{fail_media_id}/complete', headers=headers)
+                fail_complete.raise_for_status()
+                fail_sent = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                              json={'kind': 'audio', 'media_id': fail_media_id})
+                self.assertEqual(fail_sent.status_code, 202)
+                fail_task = fail_sent.json()['task_id']
+
+                async def on_startup_audio_fail(ctx):
+                    ctx['engine'] = worker_engine
+                    ctx['assets'] = S3Assets.from_env()
+                    ctx['audio_provider'] = FakeAudioProvider(fail=True)
+                    ctx['llm_provider'] = audio_llm
+                    ctx['chat_config'] = load_chat_config(RULES_DIR)
+
+                pool4 = await create_pool(settings)
+                await worker.sweep({'engine': worker_engine, 'redis': pool4})
+                runner4 = Worker([worker.run_task], redis_settings=settings, redis_pool=pool4,
+                                 max_tries=1, burst=True, poll_delay=0.05, on_startup=on_startup_audio_fail)
+                await runner4.async_run()
+                await pool4.aclose()
+                fail_after = await client.get(f'/api/v1/tasks/{fail_task}', headers=headers)
+                fail_after.raise_for_status()
+                self.assertEqual(fail_after.json()['status'], 'succeeded')
+                self.assertEqual(fail_after.json()['result']['emotion'], 'unrecognized')
+                fail_messages = await client.get(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                                 params={'limit': 1})
+                fail_messages.raise_for_status()
+                fail_bubble = fail_messages.json()['items'][0]
+                self.assertIsNone(fail_bubble['emotion_label'])
+                self.assertEqual(fail_bubble['content'],
+                                 '喵…刚才那段声音我没太听清。你摸摸我,用文字告诉我发生了什么,我一直都在。')
+                text_after_fail = await client.post(f'/api/v1/chat/sessions/{sid}/messages', headers=headers,
+                                                    json={'kind': 'text', 'content': '还能聊天吗'})
+                self.assertEqual(text_after_fail.status_code, 201)
+                self.assertEqual(text_after_fail.json()['pet_message']['source'], 'llm')
 
 
 if __name__ == '__main__':

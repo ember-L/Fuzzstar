@@ -71,7 +71,8 @@ class VideoMediaAPITests(AuthAPIFixture, TestCase):
         for bad in ({'size_bytes': MAX_VIDEO_BYTES + 1}, {'content_type': 'image/png'}, {'content_type': 'video/webm'}):
             invalid = self.presign(**bad)
             self.assertEqual((invalid.status_code, invalid.json()['code']), (422, 'MEDIA_INVALID'))
-        self.assertEqual(self.presign(kind='audio').status_code, 400)
+        # T16 起 audio 为合法 kind；此处 content_type 仍是 video/mp4，应被音频类型校验拦截。
+        self.assertEqual(self.presign(kind='audio').status_code, 422)
         photo = self.presign(kind='photo', content_type='video/mp4', size_bytes=100)
         self.assertEqual(photo.status_code, 422)
 

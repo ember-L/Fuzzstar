@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from app.providers.base import GeneratedAsset
+from app.providers.base import EmotionResult, GeneratedAsset
 
 
 class FakeImageProvider:
@@ -26,6 +26,25 @@ class FakeVideoProvider:
         if any(action in prompt for action in self.fail_actions):
             raise RuntimeError(f'fake provider failure for {prompt}')
         return GeneratedAsset(b'fake-video:' + prompt.encode(), 'video/mp4')
+
+
+class FakeAudioProvider:
+    provider = 'fake'
+    model = 'fake'
+
+    def __init__(self, emotion: str = 'happy', confidence: float = 0.82, *, fail: bool = False):
+        self.emotion = emotion
+        self.confidence = confidence
+        self.fail = fail
+        self.calls = []
+        self.last_usage = None
+
+    async def interpret(self, audio_url: str, prompt: str) -> EmotionResult:
+        self.calls.append({'audio_url': audio_url, 'prompt': prompt})
+        if self.fail:
+            raise RuntimeError('fake audio failure')
+        self.last_usage = {'tokens_in': 60, 'tokens_out': 20}
+        return EmotionResult(self.emotion, self.confidence)
 
 
 class FakeLLMProvider:
