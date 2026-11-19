@@ -2,9 +2,13 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from typing import Optional
+
+from sqlalchemy import select
+
 from app.auth import APIError, current_user, get_db
 from app.consents import grant_consent, latest_consents
-from app.models import Pet, User
+from app.models import Pet, User, WeightRecord
 from app.pets import PetInput, PetLimitReached, PetNotFound, create_pet, delete_pet, get_pet, list_pets, update_pet
 
 router = APIRouter(prefix='/api/v1')
@@ -17,10 +21,29 @@ class PolicyVersions(BaseModel):
     terms: str = Field(min_length=1, max_length=32)
 
 
+class LatestWeight(BaseModel):
+    weight_kg: float
+    measured_at: str
+
+
 class PetProfile(PetInput):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # F02-2：体重不在档案手填，来自 F08 最新记录（T13）。
+    latest_weight: Optional[LatestWeight] = None
+
+
+def _latest_weight(db: Session, pet_id: int):
+    latest = db.scalar(select(WeightRecord).where(WeightRecord.pet_id == pet_id)
+                       .order_by(WeightRecord.measured_at.desc(), WeightRecord.id.desc()).limit(1))
+    if latest is None:
+        return None
+    return {'weight_kg': float(latest.weight_kg), 'measured_at': latest.measured_at.isoformat()}
+
+
+def _profile_payload(db: Session, pet: Pet) -> dict:
+    return {**PetProfile.model_validate(pet).model_dump(), 'latest_weight': _latest_weight(db, pet.id)}
 
 
 def consent_state(db: Session, user: User, request: Request):
@@ -75,26 +98,26 @@ def owned_pet(pet_id: int, user: User = Depends(consented_user), db: Session = D
 @router.get('/pets', response_model=list[PetProfile])
 def read_pets(response: Response, user: User = Depends(consented_user), db: Session = Depends(get_db)):
     response.headers['Cache-Control'] = 'no-store'
-    return list_pets(db, user.id)
+    return [_profile_payload(db, pet) for pet in list_pets(db, user.id)]
 
 
 @router.post('/pets', status_code=201, response_model=PetProfile)
 def add_pet(data: PetInput, response: Response, user: User = Depends(consented_user), db: Session = Depends(get_db)):
     try:
-        profile = PetProfile.model_validate(create_pet(db, user.id, data))
+        pet = create_pet(db, user.id, data)
     except PetLimitReached as exc:
         raise APIError(409, 'PET_LIMIT_REACHED', '最多可添加 5 只猫咪') from exc
     except PetNotFound as exc:
         raise APIError(401, 'AUTH_REQUIRED', '请重新登录') from exc
     db.commit()
     response.headers['Cache-Control'] = 'no-store'
-    return profile
+    return _profile_payload(db, pet)
 
 
 @router.get('/pets/{pet_id}', response_model=PetProfile)
-def read_pet(response: Response, pet: Pet = Depends(owned_pet)):
+def read_pet(response: Response, pet: Pet = Depends(owned_pet), db: Session = Depends(get_db)):
     response.headers['Cache-Control'] = 'no-store'
-    return pet
+    return _profile_payload(db, pet)
 
 
 @router.patch('/pets/{pet_id}', response_model=PetProfile)
@@ -104,12 +127,12 @@ def edit_pet(changes: dict, response: Response, pet: Pet = Depends(owned_pet), d
     except ValueError as exc:
         raise APIError(400, 'VALIDATION_ERROR', '请检查猫咪档案字段') from exc
     try:
-        profile = PetProfile.model_validate(update_pet(db, pet.user_id, pet.id, data))
+        updated = update_pet(db, pet.user_id, pet.id, data)
     except PetNotFound as exc:
         raise APIError(404, 'NOT_FOUND', '未找到这只猫咪') from exc
     db.commit()
     response.headers['Cache-Control'] = 'no-store'
-    return profile
+    return _profile_payload(db, updated)
 
 
 @router.delete('/pets/{pet_id}', status_code=204)

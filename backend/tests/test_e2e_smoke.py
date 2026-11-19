@@ -11,6 +11,7 @@ import asyncio
 import io
 import os
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -289,6 +290,30 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(reference.json()['has_weight'])
                 self.assertEqual(reference.json()['disclaimer'],
                                  '以上为公开营养学公式换算的参考值,非医嘱;请结合体况与兽医建议调整。')
+
+                # T13：体重录入→骤变提示→档案/首页/喂养参考即时更新（AC-08-1/2）。
+                old_weight = await client.post(f'/api/v1/pets/{pet_id}/weights', headers=headers,
+                                               json={'weight_kg': 4.0, 'measured_at': (utcnow() - timedelta(days=6)).isoformat()})
+                old_weight.raise_for_status()
+                new_weight = await client.post(f'/api/v1/pets/{pet_id}/weights', headers=headers, json={'weight_kg': 3.5})
+                new_weight.raise_for_status()
+                weights = await client.get(f'/api/v1/pets/{pet_id}/weights', headers=headers)
+                weights.raise_for_status()
+                alert = weights.json()['trend']['alert']
+                self.assertEqual((alert['direction'], alert['pct'], alert['suggestion']), ('loss', -12.5, 'screening'))
+                profile = await client.get(f'/api/v1/pets/{pet_id}', headers=headers)
+                profile.raise_for_status()
+                self.assertEqual(profile.json()['latest_weight']['weight_kg'], 3.5)
+                weight_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                weight_health.raise_for_status()
+                self.assertEqual(weight_health.json()['latest_weight']['weight_kg'], 3.5)
+                fed_reference = await client.get(f'/api/v1/pets/{pet_id}/feeding-reference', headers=headers)
+                fed_reference.raise_for_status()
+                self.assertTrue(fed_reference.json()['has_weight'])
+                self.assertEqual(fed_reference.json()['weight_kg'], 3.5)
+                self.assertGreater(fed_reference.json()['der_kcal'], 0)
+                out_of_range = await client.post(f'/api/v1/pets/{pet_id}/weights', headers=headers, json={'weight_kg': 30.01})
+                self.assertEqual(out_of_range.status_code, 400)
 
 
 if __name__ == '__main__':
