@@ -134,6 +134,7 @@ export default function HomeScreen() {
         )}
       </View>
       {selected ? <Link href="/chat" style={styles.chatLink}>和我聊聊</Link> : null}
+      {selected ? <Link href={'/timeline/' + selected.id} style={styles.chatLink}>健康时间线</Link> : null}
       {selected ? <PhotoUpload key={selected.id} pet={selected}
         onSubmitted={next => setSubmission({ petId: selected.id, ...next })} /> : null}
       {loadError ? <Text accessibilityLiveRegion="polite" style={styles.note}>暂时无法加载猫咪档案。</Text> : null}

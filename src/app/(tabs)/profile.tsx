@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
+import { cancelPetRechecks, getPermissionState, requestPermission, type PermissionState } from '../../lib/notifications';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
 
@@ -35,6 +36,11 @@ export default function ProfileScreen() {
   const [removing, setRemoving] = useState<number>();
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(true);
+  const [notificationPermission, setNotificationPermission] = useState<PermissionState>('undetermined');
+
+  useEffect(() => {
+    getPermissionState().then(setNotificationPermission).catch(() => {});
+  }, []);
 
   function resetProfile() {
     setProfile(undefined);
@@ -138,6 +144,7 @@ export default function ProfileScreen() {
                       <Text style={styles.text}>确定移除 {pet.name} 的档案？移除后档案不再显示。</Text>
                       <Action label="确认移除" disabled={busy} onPress={() => void run(async () => {
                         await api.authorized(`/pets/${pet.id}`, { method: 'DELETE' });
+                        await cancelPetRechecks(pet.id).catch(() => {});
                         setRemoving(undefined);
                         if (editing === pet.id) { setEditing(undefined); setDraft(emptyPet); }
                         setPets(current => current.filter(item => item.id !== pet.id));
@@ -180,6 +187,17 @@ export default function ProfileScreen() {
               {editing !== undefined ? <Action label="取消编辑" onPress={() => { setEditing(undefined); setDraft(emptyPet); }} /> : null}
             </View>
           ) : null}
+          <View style={styles.card}>
+            <Text accessibilityRole="header" style={styles.heading}>通知权限</Text>
+            <Text style={styles.text}>{notificationPermission === 'granted'
+              ? '已开启：observe 初筛 24 小时后会收到复查提醒。'
+              : '未开启：复查提醒将以应用内横幅呈现，不影响任何功能。'}</Text>
+            {notificationPermission !== 'granted' ? (
+              <Action label="重新授权通知" disabled={busy} onPress={() => void run(async () => {
+                setNotificationPermission(await requestPermission());
+              })} />
+            ) : null}
+          </View>
           <Action label="在此设备退出登录" disabled={busy} onPress={() => void run(async () => {
             await api.clear();
             resetProfile();

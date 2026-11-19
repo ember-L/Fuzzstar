@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
+import { cancelPetRechecks } from '../../lib/notifications';
 import { MediaUploadError, uploadMedia, type MediaKind } from '../../lib/photo-upload';
 import { buildPayload, emptyForm, mediaLimitError, missingFields, type ScreeningForm, type SymptomsConfig } from '../../lib/screening';
 import { ApiError } from '../../lib/session';
@@ -97,6 +98,8 @@ export default function ScreeningScreen() {
       const result = await api.authorized<{ screening_id: number }>(`/pets/${id}/screenings`, {
         method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
+      // 复查完成（F06-3 / AC-10-1）：取消该猫全部待触发的复查提醒，新结果页按需重新注册。
+      await cancelPetRechecks(id).catch(() => {});
       router.replace(`/screening/result/${result.screening_id}`);
     } catch (error) {
       if (controller.signal.aborted) return;

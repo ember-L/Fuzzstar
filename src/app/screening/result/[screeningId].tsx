@@ -4,6 +4,8 @@ import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View
 import { Screen } from '../../../components/Screen';
 import { api } from '../../../lib/api';
 import { DISCLAIMER, STATE_LABELS, stateTone } from '../../../lib/screening';
+import { cancelPetRechecks, scheduleRecheck } from '../../../lib/notifications';
+import { buildRecheckReminder, shouldSchedule } from '../../../lib/recheck-reminder';
 import { adviceNotice, shouldPollAdvice, type AdviceView } from '../../../lib/screening-advice';
 import { ApiError } from '../../../lib/session';
 import { pollTask } from '../../../lib/task-poller';
@@ -33,6 +35,8 @@ export default function ScreeningResultScreen() {
   const [detail, setDetail] = useState<ScreeningDetail | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const reminderHandled = useRef(new Set<number>());
 
   const load = useCallback(() => {
     api.authorized<ScreeningDetail>(`/screenings/${screeningId}`).then(next => { setDetail(next); setLoadFailed(false); }).catch(error => {
@@ -55,6 +59,25 @@ export default function ScreeningResultScreen() {
     }).then(outcome => { if (outcome.kind !== 'aborted') load(); }).catch(() => {});
     return () => controller.abort();
   }, [detail, load]);
+
+  // observe 结果注册 +24h 复查提醒（F06-2）；权限拒绝时应用内横幅降级（F10-3）。
+  useEffect(() => {
+    if (!detail || detail.state !== 'observe' || reminderHandled.current.has(detail.screening_id)) return;
+    reminderHandled.current.add(detail.screening_id);
+    let active = true;
+    void (async () => {
+      const pets = await api.authorized<{ id: number; name: string }[]>('/pets');
+      const petName = pets.find(pet => pet.id === detail.pet_id)?.name ?? '猫咪';
+      const reminder = buildRecheckReminder(detail, petName);
+      if (!shouldSchedule(reminder, Date.now())) return;
+      await cancelPetRechecks(detail.pet_id).catch(() => {});
+      const outcome = await scheduleRecheck(reminder);
+      if (!active) return;
+      if (outcome === 'scheduled') setReminderNotice('已注册 24 小时后的复查提醒；提前复查会自动取消。');
+      else setReminderNotice('通知权限未开启，复查提醒将以应用内横幅呈现；可在「我的」重新授权。');
+    })().catch(() => {});
+    return () => { active = false; };
+  }, [detail]);
 
   const openMedia = async (mediaId: string) => {
     try {
@@ -94,6 +117,9 @@ export default function ScreeningResultScreen() {
         <Text style={[styles.stateText, { color: TONE_COLORS[tone] }]}>{STATE_LABELS[detail.state] ?? detail.state}</Text>
         <Text style={styles.subtitle}>{formatTime(detail.created_at)} · 规则版本 {detail.rules_version}</Text>
       </View>
+      {reminderNotice ? (
+        <View style={styles.reminderBanner}><Text style={styles.reminderText}>{reminderNotice}</Text></View>
+      ) : null}
       {detail.redline_card ? (
         <View style={styles.redCard}>
           <Text style={styles.redTitle}>{detail.redline_card.title}</Text>
@@ -157,6 +183,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 12, lineHeight: 18, color: colors.secondary, marginTop: 4 },
   body: { fontSize: 14, lineHeight: 20, color: colors.text, flexShrink: 1 },
   stateCard: { padding: 18, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 2, gap: 4 },
+  reminderBanner: { padding: 12, borderRadius: 12, backgroundColor: colors.soft },
+  reminderText: { fontSize: 13, lineHeight: 20, color: colors.text },
   stateText: { fontSize: 22, fontWeight: '700' },
   redCard: { padding: 18, borderRadius: 18, backgroundColor: '#FDECEC', gap: 8 },
   redTitle: { fontSize: 20, fontWeight: '700', color: '#B3261E' },
