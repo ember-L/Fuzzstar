@@ -26,5 +26,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index('ix_user_credentials_user_id', table_name='user_credentials')
     op.drop_table('user_credentials')

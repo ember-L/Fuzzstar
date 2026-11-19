@@ -37,7 +37,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_weight_records_pet_time', table_name='weight_records')
     op.drop_table('weight_records')
-    op.drop_index('ix_diet_records_pet_time', table_name='diet_records')
     op.drop_table('diet_records')

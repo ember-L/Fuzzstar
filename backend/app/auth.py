@@ -64,8 +64,13 @@ def auth_required():
 
 
 def get_db(request: Request):
+    from app.quota import flush_quota_denials
     with Session(request.app.state.engine) as db:
-        yield db
+        try:
+            yield db
+        finally:
+            db.rollback()
+            flush_quota_denials(db)
 
 
 def token_pair(db: Session, secret: str, refresh_token: str, now: datetime) -> TokenPair:

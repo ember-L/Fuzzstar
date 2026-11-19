@@ -28,5 +28,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_request_idempotency_user_id', table_name='request_idempotency')
     op.drop_table('request_idempotency')

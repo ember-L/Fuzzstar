@@ -37,6 +37,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_chat_messages_session_time', table_name='chat_messages')
+    # DROP TABLE removes its indexes; explicit DROP INDEX fails on MySQL (1553)
+    # when the index backs a foreign key.
     op.drop_table('chat_messages')
     op.drop_table('chat_sessions')

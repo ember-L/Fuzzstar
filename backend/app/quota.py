@@ -70,8 +70,25 @@ def quota_snapshot(db: Session, user_id: int, *, now: datetime, env: Optional[di
 
 def quota_gate(db: Session, user_id: int, metric: str, *, now: Optional[datetime] = None) -> int:
     from app.auth import APIError, utcnow
+    from app.observability import log_quota_denial
+    moment = now or utcnow()
     try:
-        return consume_quota(db, user_id, metric, now=now or utcnow())
+        return consume_quota(db, user_id, metric, now=moment)
     except QuotaExceeded as exc:
+        log_quota_denial(user_id, exc.metric, exc.used, exc.limit)
+        # The business transaction rolls back; the denial audit must survive it.
+        # Defer the write until get_db releases the transaction (SQLite allows
+        # only one writer, so an immediate second session would deadlock).
+        db.info.setdefault('quota_denials', []).append(
+            {'user_id': user_id, 'metric': exc.metric, 'day': moment.date()})
         raise APIError(429, 'QUOTA_EXCEEDED', '今日次数已用完，明日再试',
                        {'metric': exc.metric, 'used': exc.used, 'limit': exc.limit}) from exc
+
+
+def flush_quota_denials(db: Session) -> None:
+    pending = db.info.pop('quota_denials', None)
+    if not pending:
+        return
+    from app.models import QuotaDenial
+    with Session(db.bind) as audit, audit.begin():
+        audit.add_all([QuotaDenial(**row) for row in pending])

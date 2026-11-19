@@ -21,7 +21,8 @@ from app.chat import load_chat_config
 from app.avatars import S3Assets, generate_avatar
 from app.gif import export_gif
 from app.idempotency import IDEMPOTENCY_TTL
-from app.models import MediaUpload, RequestIdempotency, Task
+from app.models import MediaUpload, QuotaDenial, RequestIdempotency, Task
+from app.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
 from app.privacy import purge_due
 from app.tasks import MAX_ATTEMPTS, claim_task, finish_task
 from app.triage import load_rules
@@ -53,6 +54,7 @@ async def run_task(ctx, task_id):
     task = None
     try:
         task, media = await asyncio.to_thread(_load, ctx['engine'], task_id)
+        log_task_event('claimed', task_id=task.id, task_type=task.type, attempts=attempt)
         if task.type == 'avatar_batch':
             result = await generate_avatar(task, media, assets=ctx['assets'],
                                            image_provider=ctx['image_provider'], video_provider=ctx['video_provider'])
@@ -73,8 +75,11 @@ async def run_task(ctx, task_id):
             if attempt >= MAX_ATTEMPTS:
                 await asyncio.to_thread(apply_template_fallback, ctx['engine'], task_id, ctx['advice_templates'])
         await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, None)
+        log_task_event('failed', task_id=task_id, task_type=task.type if task else 'unknown',
+                       attempts=attempt, status='failed' if attempt >= MAX_ATTEMPTS else 'retry')
         return
     await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, result)
+    log_task_event('finished', task_id=task_id, task_type=task.type, attempts=attempt, status='succeeded')
 
 
 def _sweep_db(engine):
@@ -93,6 +98,8 @@ def _sweep_db(engine):
         db.execute(delete(MediaUpload).where(MediaUpload.version_id.is_(None),
                                              MediaUpload.expires_at <= now - MEDIA_CLEANUP_GRACE))
         db.execute(delete(RequestIdempotency).where(RequestIdempotency.created_at <= now - IDEMPOTENCY_TTL))
+        db.execute(delete(QuotaDenial).where(
+            QuotaDenial.created_at <= now - timedelta(days=QUOTA_DENIAL_RETENTION_DAYS)))
         return dispatch
 
 

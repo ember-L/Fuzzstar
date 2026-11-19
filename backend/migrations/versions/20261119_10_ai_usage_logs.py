@@ -31,5 +31,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_ai_usage_logs_created_at', table_name='ai_usage_logs')
     op.drop_table('ai_usage_logs')

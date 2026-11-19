@@ -23,5 +23,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index('ix_consents_user_id', table_name='consents')
     op.drop_table('consents')

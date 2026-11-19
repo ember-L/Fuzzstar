@@ -25,7 +25,5 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index('ix_refresh_tokens_session_id', table_name='refresh_tokens')
     op.drop_table('refresh_tokens')
-    op.drop_index('ix_auth_sessions_user_id', table_name='auth_sessions')
     op.drop_table('auth_sessions')

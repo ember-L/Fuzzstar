@@ -15,6 +15,7 @@ from app.chat import load_chat_config
 from app.chat_api import router as chat_router
 from app.config_api import router as config_router
 from app.media import PhotoStorage
+from app.observability import request_log
 from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
@@ -94,6 +95,7 @@ def create_dev_app():
     instance.include_router(chat_router)
     instance.include_router(quota_router)
     instance.middleware('http')(auth_rate_limit)
+    instance.middleware('http')(request_log)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
                             allow_headers=['Authorization', 'Content-Type', 'Idempotency-Key'])

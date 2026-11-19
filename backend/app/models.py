@@ -291,6 +291,17 @@ class UsageCounter(Base):
     count: Mapped[int] = mapped_column(Integer, default=0, server_default='0', nullable=False)
 
 
+class QuotaDenial(Base):
+    __tablename__ = 'quota_denials'
+    __table_args__ = (Index('ix_quota_denials_day', 'day'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    metric: Mapped[str] = mapped_column(String(16), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
+
 class Plan(Base):
     __tablename__ = 'plans'
 

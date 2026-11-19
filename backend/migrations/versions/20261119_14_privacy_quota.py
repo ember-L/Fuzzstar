@@ -52,7 +52,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table('entitlements')
     op.drop_table('plans')
-    op.drop_index('ix_usage_counters_user_id', table_name='usage_counters')
     op.drop_table('usage_counters')
-    op.drop_index('ix_deletion_jobs_purge_after', table_name='deletion_jobs')
     op.drop_table('deletion_jobs')

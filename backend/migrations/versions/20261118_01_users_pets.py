@@ -36,6 +36,5 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index('ix_pets_user_status', table_name='pets')
     op.drop_table('pets')
     op.drop_table('users')
