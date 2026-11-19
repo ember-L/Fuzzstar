@@ -7,7 +7,7 @@ import { getAssetStore } from '../lib/asset-store';
 import { type AvatarView, type PlaceholderManifest } from '../lib/avatar';
 import { ApiError } from '../lib/session';
 import { pollTask, type TaskSnapshot } from '../lib/task-poller';
-import { AvatarPlayer, type HealthInput } from './avatar/AvatarPlayer';
+import { AvatarPlayer, type EmotionEvent, type HealthInput } from './avatar/AvatarPlayer';
 import { colors } from '../theme';
 
 export interface Submission {
@@ -17,10 +17,11 @@ export interface Submission {
 
 // 首页分身舞台：提交后立即播放占位首帧（AC-03-1），轮询任务，播放交给 AvatarPlayer。
 // health 由 T08 健康 store 接线；当前首页无健康数据时按 normal 待机。
-export function AvatarStage({ pet, submission, health }: {
+export function AvatarStage({ pet, submission, health, emotionEvent }: {
   pet: { id: number; name: string };
   submission?: Submission;
   health?: HealthInput | null;
+  emotionEvent?: EmotionEvent | null;
 }) {
   const [fetched, setFetched] = useState<AvatarView | null>(null);
   const [notice, setNotice] = useState<{ taskId: string; text: string } | null>(null);
@@ -110,7 +111,7 @@ export function AvatarStage({ pet, submission, health }: {
 
   return (
     <View style={styles.stage}>
-      <AvatarPlayer pet={pet} avatar={avatar} map={map} health={health} />
+      <AvatarPlayer pet={pet} avatar={avatar} map={map} health={health} emotionEvent={emotionEvent} />
       {caption ? <Text accessibilityLiveRegion="polite" style={styles.caption}>{caption}</Text> : null}
     </View>
   );

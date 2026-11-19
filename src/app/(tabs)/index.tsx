@@ -1,10 +1,11 @@
 import { Link, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AvatarStage, type Submission } from '../../components/AvatarStage';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
+import { emotionBus } from '../../lib/chat-emotion';
 import { tzOffsetMinutes } from '../../lib/diet';
 import { formatDateTime, isUrgent, scoreDisplay, stateLabel, totalEffective, type HealthSummary } from '../../lib/health';
 import { ApiError } from '../../lib/session';
@@ -26,6 +27,9 @@ export default function HomeScreen() {
   const [submission, setSubmission] = useState<(Submission & { petId: number }) | undefined>();
   const [health, setHealth] = useState<HealthSummary | null>(null);
   const [showDeductions, setShowDeductions] = useState(false);
+  const [emotionEvent, setEmotionEvent] = useState<{ id: string; petId: number; emotion: string } | null>(null);
+  // F09-5：聊聊页回复情绪→仅当前选中猫的分身播一次对应动作后回待机。
+  useEffect(() => emotionBus.subscribe(event => setEmotionEvent({ id: String(event.id), petId: event.petId, emotion: event.emotion })), []);
   const selected = pets.find(pet => pet.id === selectedId) ?? pets[0];
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -79,6 +83,7 @@ export default function HomeScreen() {
         {selected ? (
           <AvatarStage key={selected.id} pet={selected}
             health={health ? { state: health.state } : null}
+            emotionEvent={emotionEvent && emotionEvent.petId === selected.id ? { id: emotionEvent.id, emotion: emotionEvent.emotion } : null}
             submission={submission?.petId === selected.id ? submission : undefined} />
         ) : (
           <Image source={require('../../../assets/figma/59f10c90466cfa3aa84c0f88478dccedc8f69565.png')} style={styles.cat} accessibilityLabel="绒星猫咪示意图" />
