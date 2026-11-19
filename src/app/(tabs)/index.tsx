@@ -5,6 +5,7 @@ import { AvatarStage, type Submission } from '../../components/AvatarStage';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
+import { tzOffsetMinutes } from '../../lib/diet';
 import { formatDateTime, isUrgent, scoreDisplay, stateLabel, totalEffective, type HealthSummary } from '../../lib/health';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
@@ -44,7 +45,7 @@ export default function HomeScreen() {
     setShowDeductions(false);
     if (!selectedPetId) { setHealth(null); return; }
     let active = true;
-    api.authorized<HealthSummary>('/pets/' + selectedPetId + '/health')
+    api.authorized<HealthSummary>('/pets/' + selectedPetId + '/health?tz_offset_minutes=' + tzOffsetMinutes())
       .then(data => { if (active) setHealth(data); })
       .catch(() => { if (active) setHealth(null); });
     return () => { active = false; };
@@ -111,13 +112,35 @@ export default function HomeScreen() {
       </View>
       <Text accessibilityRole="header" style={styles.section}>今日概览</Text>
       <View style={styles.row}>
-        <View style={styles.summary}>
-          <Text style={styles.summaryTitle}>今日饮食</Text>
-          <Text style={styles.subtitle}>暂无记录</Text>
-        </View>
+        {selected ? (
+          <Link href={'/diet/' + selected.id} style={styles.summary}>
+            <Text style={styles.summaryTitle}>今日饮食</Text>
+            {health?.diet_today && health.diet_today.count > 0 ? (
+              <>
+                <Text style={styles.summaryValue}>{health.diet_today.total_g}g · {health.diet_today.total_kcal}kcal</Text>
+                <Text style={styles.subtitle}>{health.diet_today.count} 笔 · 点击查看</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.subtitle}>暂无记录</Text>
+                <Text style={styles.subtitle}>点击记一笔</Text>
+              </>
+            )}
+          </Link>
+        ) : (
+          <View style={styles.summary}>
+            <Text style={styles.summaryTitle}>今日饮食</Text>
+            <Text style={styles.subtitle}>暂无记录</Text>
+          </View>
+        )}
         <View style={styles.summary}>
           <Text style={styles.summaryTitle}>最新体重</Text>
-          <Text style={styles.subtitle}>暂无记录</Text>
+          {health?.latest_weight ? (
+            <>
+              <Text style={styles.summaryValue}>{health.latest_weight.weight_kg} kg</Text>
+              <Text style={styles.subtitle}>{formatDateTime(health.latest_weight.measured_at)}</Text>
+            </>
+          ) : <Text style={styles.subtitle}>暂无记录</Text>}
         </View>
         {selected ? (
           <Link href={'/screening/history/' + selected.id} style={styles.summary}>
@@ -163,6 +186,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 10 },
   summary: { flex: 1, minHeight: 92, padding: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.surface },
   summaryTitle: { fontSize: 12, fontWeight: '600', color: colors.text },
+  summaryValue: { fontSize: 13, fontWeight: '700', color: colors.text, marginTop: 4, textAlign: 'center' },
   chatLink: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 12, backgroundColor: colors.soft, color: colors.text, fontWeight: '600', overflow: 'hidden' },
   selector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pet: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.surface },

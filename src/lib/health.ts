@@ -19,8 +19,8 @@ export interface HealthSummary {
   rules_version: string;
   deductions: Deduction[];
   latest_screening: { screening_id: number; state: string; created_at: string } | null;
-  diet_today: unknown | null;
-  latest_weight: unknown | null;
+  diet_today: { date: string; total_g: number; total_kcal: number; count: number } | null;
+  latest_weight: { weight_kg: number; measured_at: string } | null;
   urgent_card: { title: string; subtitle: string; preparation: string[] } | null;
 }
 
