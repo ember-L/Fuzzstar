@@ -195,6 +195,11 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(urgent_advice['text'], templates['states']['urgent']['text'])
                 with Session(worker_engine) as db:
                     self.assertEqual(db.scalars(select(AiUsageLog)).all(), [])
+                # T08：urgent 首页健康聚合——红色状态卡+常驻就医入口。
+                urgent_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                urgent_health.raise_for_status()
+                self.assertEqual((urgent_health.json()['state'], urgent_health.json()['score']), ('urgent', 40))
+                self.assertEqual(urgent_health.json()['urgent_card']['title'], '建议立即就医')
                 history = await client.get(f'/api/v1/pets/{pet_id}/screenings', headers=headers)
                 history.raise_for_status()
                 self.assertEqual(history.json()['items'][0]['screening_id'], record['screening_id'])
@@ -204,6 +209,12 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(normal.json()['state'], 'normal')
                 self.assertIsNone(normal.json()['redline_card'])
                 self.assertIsNotNone(normal.json()['task_id'])
+                # T08/F06-3：复查正常覆盖旧 urgent 事件，一次刷新回 normal/100。
+                normal_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                normal_health.raise_for_status()
+                self.assertEqual((normal_health.json()['state'], normal_health.json()['score']), ('normal', 100))
+                self.assertEqual(normal_health.json()['deductions'], [])
+                self.assertIsNone(normal_health.json()['urgent_card'])
                 removed = await client.delete(
                     f"/api/v1/screenings/{record['screening_id']}/media/{media_id}", headers=headers)
                 self.assertEqual(removed.status_code, 204)
@@ -221,6 +232,10 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(observe_record['state'], 'observe')
                 observe_task = observe_record['task_id']
                 self.assertIsNotNone(observe_task)
+                observe_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                observe_health.raise_for_status()
+                self.assertEqual((observe_health.json()['state'], observe_health.json()['score']), ('observe', 90))
+                self.assertEqual(observe_health.json()['deductions'][0]['symptoms'], ['呕吐'])
                 before = await client.get(f"/api/v1/screenings/{observe_record['screening_id']}", headers=headers)
                 before.raise_for_status()
                 self.assertEqual(before.json()['advice']['status'], 'pending')
@@ -244,6 +259,10 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(logs), 1)
                     self.assertEqual((logs[0].kind, logs[0].provider, logs[0].tokens_in, logs[0].tokens_out),
                                      ('llm', 'fake', 100, 30))
+                final_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                final_health.raise_for_status()
+                self.assertEqual((final_health.json()['state'], final_health.json()['score']), ('observe', 90))
+                self.assertEqual(final_health.json()['latest_screening']['screening_id'], observe_record['screening_id'])
 
 
 if __name__ == '__main__':

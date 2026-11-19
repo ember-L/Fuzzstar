@@ -17,6 +17,7 @@ from app.rules import load_action_map
 from app.media_api import router as media_router
 from app.pet_api import router as pet_router
 from app.placeholders import load_library
+from app.health_api import router as health_router
 from app.screening_api import router as screening_router
 from app.task_api import router as task_router
 from app.advice import load_advice_templates
@@ -76,6 +77,7 @@ def create_dev_app():
     instance.include_router(media_router)
     instance.include_router(config_router)
     instance.include_router(screening_router)
+    instance.include_router(health_router)
     instance.middleware('http')(auth_rate_limit)
     instance.add_middleware(CORSMiddleware, allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
                             allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],

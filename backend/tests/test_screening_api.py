@@ -111,8 +111,11 @@ class ScreeningSubmitTests(ScreeningFixture, TestCase):
         self.assertEqual(vet['state'], 'vet')
         with Session(self.engine) as db:
             events = db.scalars(select(HealthEvent).where(HealthEvent.pet_id == self.pet).order_by(HealthEvent.id)).all()
+            # F06-3 复查覆盖（T08 提前实现）：vet 复查解决旧 observe 事件，仅最新结论活跃。
             self.assertEqual([(e.severity, e.score_delta, e.active, e.source) for e in events],
-                             [('observe', 10, True, 'screening'), ('vet', 30, True, 'screening')])
+                             [('observe', 10, False, 'screening'), ('vet', 30, True, 'screening')])
+            self.assertIsNotNone(events[0].resolved_at)
+            self.assertIsNone(events[1].resolved_at)
             self.assertEqual([e.source_id for e in events], [observe['screening_id'], vet['screening_id']])
 
     def test_explicit_redline_is_urgent_with_verbatim_copy(self):

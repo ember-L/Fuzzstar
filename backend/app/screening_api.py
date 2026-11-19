@@ -140,6 +140,12 @@ def submit_screening(data: ScreeningInput, request: Request, response: Response,
                                 frequency=item.frequency, notes=item.notes, severe=item.severe))
     for item in media:
         db.add(ScreeningMedia(screening_id=screening.id, media_id=item.id, type=item.kind))
+    # 复查覆盖（F06-3）：新初筛结论解决该猫旧的活跃 screening 事件，健康分与状态即时重算。
+    stale = db.scalars(select(HealthEvent).where(HealthEvent.pet_id == pet.id,
+                                               HealthEvent.source == 'screening', HealthEvent.active == True)).all()
+    for event in stale:
+        event.active = False
+        event.resolved_at = utcnow()
     if result['state'] != 'normal':
         db.add(HealthEvent(pet_id=pet.id, source='screening', source_id=screening.id, severity=result['state'],
                            score_delta=bundle.scoring['deltas'][result['state']], active=True))
