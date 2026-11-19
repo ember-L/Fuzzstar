@@ -4,6 +4,9 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
 import { BACKDATE_OPTIONS, FOOD_LABELS, fedAtFor, localDate, parseAmount, shiftDay, tzOffsetMinutes, type DietRecord } from '../../lib/diet';
+import { getOfflineStore } from '../../lib/offline-store';
+import { offlineSync } from '../../lib/offline-sync';
+import { classifyFailure, dietQueueItem, generateKey, parseDietBody, type QueueItem } from '../../lib/retry-queue';
 import { ApiError } from '../../lib/session';
 import { formatClock } from '../../lib/timeline';
 import { colors } from '../../theme';
@@ -36,6 +39,8 @@ export default function DietScreen() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [pending, setPending] = useState<QueueItem[]>([]);
 
   const load = useCallback((target: string) => {
     api.authorized<DailyView>(`/pets/${petId}/diet?date=${target}&tz_offset_minutes=${tzOffsetMinutes()}`)
@@ -44,23 +49,55 @@ export default function DietScreen() {
   }, [petId]);
   useEffect(() => { load(day); }, [day, load]);
 
+  // 浅离线（F07-5）：待同步队列本地可见；补发成功/被拒时刷新当日明细。
+  const loadPending = useCallback(() => {
+    getOfflineStore().then(store => store.queue.list())
+      .then(items => setPending(items.filter(item => item.kind === 'diet' && item.petId === Number(petId))))
+      .catch(() => {});
+  }, [petId]);
+  useEffect(() => { loadPending(); }, [loadPending]);
+  useEffect(() => {
+    const unsubscribe = offlineSync.subscribe(result => {
+      if (result.synced > 0) { load(day); setInfo(null); }
+      const rejected = result.dropped.filter(d => d.item.kind === 'diet' && d.item.petId === Number(petId));
+      if (rejected.length > 0) setMessage(`一条待同步记录被拒绝：${rejected[0].error}`);
+      loadPending();
+    });
+    void offlineSync.drainNow();
+    return unsubscribe;
+  }, [day, load, loadPending, petId]);
+
   // 快录三步：进入页面 → 输入克数 → 点「记一笔」（类型默认干粮、时间默认现在）。
   const submit = async () => {
     const parsed = parseAmount(amountText);
     if (!parsed.ok) { setMessage(parsed.message); return; }
-    setBusy(true); setMessage(null);
+    const body: Record<string, unknown> = { food_type: foodType, amount_g: parsed.value };
+    if (hours > 0) body.fed_at = fedAtFor(hours);
+    if (note.trim()) body.note = note.trim();
+    const key = generateKey();
+    setBusy(true); setMessage(null); setInfo(null);
     try {
-      const body: Record<string, unknown> = { food_type: foodType, amount_g: parsed.value };
-      if (hours > 0) body.fed_at = fedAtFor(hours);
-      if (note.trim()) body.note = note.trim();
       const record = await api.authorized<DietRecord>(`/pets/${petId}/diet`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify(body),
       });
       setAmountText(''); setNote(''); setHours(0);
       const target = recordDay(record.fed_at);
       if (target !== day) setDay(target); else load(day);
     } catch (error) {
-      setMessage(error instanceof ApiError ? error.message : '记录失败，请稍后重试');
+      if (classifyFailure(error) === 'retry') {
+        // 断网/服务暂不可用：入持久队列，联网后带同一幂等键自动补发，不产生重复记录。
+        try {
+          const store = await getOfflineStore();
+          await store.queue.insert(dietQueueItem(Number(petId), body, key, Date.now()));
+          setAmountText(''); setNote(''); setHours(0);
+          setInfo('已保存，待同步；联网后自动补发。');
+          loadPending();
+        } catch {
+          setMessage('离线保存失败，请稍后重试');
+        }
+      } else {
+        setMessage(error instanceof ApiError ? error.message : '记录失败，请稍后重试');
+      }
     } finally { setBusy(false); }
   };
 
@@ -75,6 +112,7 @@ export default function DietScreen() {
   };
 
   const atToday = day >= localDate();
+  const pendingForDay = pending.filter(item => recordDay(parseDietBody(item).fed_at) === day);
   return (
     <Screen>
       <Text accessibilityRole="header" style={styles.title}>饮食记录</Text>
@@ -137,8 +175,27 @@ export default function DietScreen() {
           <Text style={styles.primaryText}>{busy ? '记录中…' : '记一笔'}</Text>
         </Pressable>
         {message ? <Text accessibilityLiveRegion="polite" style={styles.message}>{message}</Text> : null}
+        {info ? <Text accessibilityLiveRegion="polite" style={styles.info}>{info}</Text> : null}
       </View>
+      {pendingForDay.length > 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>待同步</Text>
+          {pendingForDay.map(item => {
+            const parsed = parseDietBody(item);
+            return (
+              <View key={item.id} style={styles.record}>
+                <View style={styles.recordText}>
+                  <Text style={styles.recordTitle}>{FOOD_LABELS[parsed.food_type] ?? '其他'} {parsed.amount_g}g · 待同步</Text>
+                  <Text style={styles.subtitle}>{formatClock(parsed.fed_at)}{parsed.note ? ` · ${parsed.note}` : ''}</Text>
+                </View>
+              </View>
+            );
+          })}
+          <Text style={styles.subtitle}>联网后自动补发，不会产生重复记录。</Text>
+        </View>
+      ) : null}
       <Link href={`/feeding/${petId}`} style={styles.link}>查看喂养参考（RER/DER）</Link>
+      <Link href={`/reminders/${petId}`} style={styles.link}>喂养提醒</Link>
     </Screen>
   );
 }
@@ -167,5 +224,6 @@ const styles = StyleSheet.create({
   primary: { minHeight: 48, borderRadius: 14, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: colors.onBrand, fontWeight: '700', fontSize: 15 },
   message: { fontSize: 13, color: '#B3261E' },
+  info: { fontSize: 13, color: '#3D6B1E' },
   link: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 12, backgroundColor: colors.soft, color: colors.text, fontWeight: '600', overflow: 'hidden' },
 });

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
-import { cancelPetRechecks, getPermissionState, requestPermission, type PermissionState } from '../../lib/notifications';
+import { cancelPetFeeding, cancelPetRechecks, getPermissionState, requestPermission, type PermissionState } from '../../lib/notifications';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
 
@@ -145,6 +145,7 @@ export default function ProfileScreen() {
                       <Action label="确认移除" disabled={busy} onPress={() => void run(async () => {
                         await api.authorized(`/pets/${pet.id}`, { method: 'DELETE' });
                         await cancelPetRechecks(pet.id).catch(() => {});
+                        await cancelPetFeeding(pet.id).catch(() => {});
                         setRemoving(undefined);
                         if (editing === pet.id) { setEditing(undefined); setDraft(emptyPet); }
                         setPets(current => current.filter(item => item.id !== pet.id));
