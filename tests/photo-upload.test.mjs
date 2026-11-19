@@ -13,7 +13,7 @@ test('sends the original file to storage without API credentials, then verifies 
     calls.push(path);
     assert.equal(init.method, 'POST');
     if (path === '/media/presign') {
-      assert.deepEqual(JSON.parse(init.body), { pet_id: 2, content_type: 'image/png', size_bytes: photo.size });
+      assert.deepEqual(JSON.parse(init.body), { pet_id: 2, kind: 'photo', content_type: 'image/png', size_bytes: photo.size });
       return { media_id: mediaId, upload };
     }
     assert.equal(path, `/media/${mediaId}/complete`);
