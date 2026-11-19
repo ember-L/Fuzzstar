@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from app.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
 from app.auth import utcnow
 from app.avatars import S3Assets, generate_avatar
-from app.models import MediaUpload, Task
+from app.idempotency import IDEMPOTENCY_TTL
+from app.models import MediaUpload, RequestIdempotency, Task
 from app.tasks import MAX_ATTEMPTS, claim_task, finish_task
 from app.triage import load_rules
 
@@ -81,6 +82,7 @@ def _sweep_db(engine):
                 dispatch.append(task.id)
         db.execute(delete(MediaUpload).where(MediaUpload.version_id.is_(None),
                                              MediaUpload.expires_at <= now - MEDIA_CLEANUP_GRACE))
+        db.execute(delete(RequestIdempotency).where(RequestIdempotency.created_at <= now - IDEMPOTENCY_TTL))
         return dispatch
 
 

@@ -10,11 +10,13 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import APIError, get_db, utcnow
 from app.feeding import FEEDING_DISCLAIMER, feeding_reference, kcal_estimate
-from app.models import DietRecord, User, WeightRecord
+from app.idempotency import find_replay, hash_request, validate_key
+from app.models import DietRecord, RequestIdempotency, User, WeightRecord
 from app.pet_api import consented_user, owned_pet
 
 router = APIRouter(prefix='/api/v1/pets', tags=['diet'])
@@ -53,10 +55,32 @@ def _day_window(day: date_type, tz_offset_minutes: int) -> tuple[datetime, datet
 
 
 @router.post('/{pet_id}/diet', status_code=201)
-def create_diet(pet_id: int, body: DietInput, response: Response,
+def create_diet(pet_id: int, body: DietInput, request: Request, response: Response,
                 user: User = Depends(consented_user), db: Session = Depends(get_db),
                 config: dict = Depends(feeding_config)):
     pet = owned_pet(pet_id, user, db)
+    # F07-5：离线补发带同一 Idempotency-Key；命中缓存直接回放，不产生重复记录。
+    key = validate_key(request.headers.get('Idempotency-Key'))
+    request_hash = hash_request(request.url.path, body.model_dump(mode='json')) if key else None
+    row = None
+    if key:
+        replay = find_replay(db, user.id, key, request_hash)
+        if replay is not None:
+            response.headers['Cache-Control'] = 'no-store'
+            response.headers['Idempotent-Replay'] = 'true'
+            return replay
+        row = RequestIdempotency(user_id=user.id, key=key, request_hash=request_hash)
+        db.add(row)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            replay = find_replay(db, user.id, key, request_hash)
+            if replay is None:
+                raise APIError(409, 'IDEMPOTENCY_CONFLICT', '该幂等键已用于不同的请求')
+            response.headers['Cache-Control'] = 'no-store'
+            response.headers['Idempotent-Replay'] = 'true'
+            return replay
     now = utcnow()
     fields = []
     if not 0 < body.amount_g <= 2000:
@@ -82,10 +106,14 @@ def create_diet(pet_id: int, body: DietInput, response: Response,
                         amount_g=amount, kcal_est=kcal_estimate(config, body.food_type, amount),
                         fed_at=fed_at, note=body.note)
     db.add(record)
+    db.flush()
+    payload = _record_payload(record)
+    if row is not None:
+        row.status_code = 201
+        row.response_json = payload
     db.commit()
-    db.refresh(record)
     response.headers['Cache-Control'] = 'no-store'
-    return _record_payload(record)
+    return payload
 
 
 @router.get('/{pet_id}/diet')

@@ -230,3 +230,16 @@ class WeightRecord(Base):
     pet_id: Mapped[int] = mapped_column(ForeignKey('pets.id'), nullable=False)
     weight_kg: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class RequestIdempotency(Base):
+    __tablename__ = 'request_idempotency'
+    __table_args__ = (UniqueConstraint('user_id', 'key', name='uk_idempotency_user_key'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True, nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    response_json: Mapped[Optional[dict]] = mapped_column(JSON(none_as_null=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())

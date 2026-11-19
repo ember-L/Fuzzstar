@@ -315,6 +315,25 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 out_of_range = await client.post(f'/api/v1/pets/{pet_id}/weights', headers=headers, json={'weight_kg': 30.01})
                 self.assertEqual(out_of_range.status_code, 400)
 
+                # T14：幂等键回放——同键同 body 返回同一记录，不重复计数；同键异 body 409。
+                key_headers = {**headers, 'Idempotency-Key': 'e2e-diet-key-0001'}
+                first = await client.post(f'/api/v1/pets/{pet_id}/diet', headers=key_headers,
+                                          json={'food_type': 'dry', 'amount_g': 30})
+                self.assertEqual(first.status_code, 201)
+                replay = await client.post(f'/api/v1/pets/{pet_id}/diet', headers=key_headers,
+                                           json={'food_type': 'dry', 'amount_g': 30})
+                self.assertEqual(replay.status_code, 201)
+                self.assertEqual(replay.json()['id'], first.json()['id'])
+                self.assertEqual(replay.headers.get('idempotent-replay'), 'true')
+                conflict = await client.post(f'/api/v1/pets/{pet_id}/diet', headers=key_headers,
+                                             json={'food_type': 'dry', 'amount_g': 31})
+                self.assertEqual(conflict.status_code, 409)
+                self.assertEqual(conflict.json()['code'], 'IDEMPOTENCY_CONFLICT')
+                after_replay = await client.get(f'/api/v1/pets/{pet_id}/diet', headers=headers,
+                                                params={'date': utcnow().date().isoformat(), 'tz_offset_minutes': 0})
+                after_replay.raise_for_status()
+                self.assertEqual((after_replay.json()['count'], after_replay.json()['total_kcal']), (2, 304.0))
+
 
 if __name__ == '__main__':
     unittest.main()
