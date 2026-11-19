@@ -26,3 +26,22 @@ class FakeVideoProvider:
         if any(action in prompt for action in self.fail_actions):
             raise RuntimeError(f'fake provider failure for {prompt}')
         return GeneratedAsset(b'fake-video:' + prompt.encode(), 'video/mp4')
+
+
+class FakeLLMProvider:
+    provider = 'fake'
+    model = 'fake'
+
+    def __init__(self, reply: str = '{"text": "建议观察精神与食欲变化。", "tips": ["记录变化"]}', *, fail_times: int = 0):
+        self.reply = reply
+        self.fail_times = fail_times
+        self.calls = []
+        self.last_usage = None
+
+    async def chat(self, messages: list[dict], *, temperature: float = 0.3, max_tokens: int = 800) -> str:
+        self.calls.append({'messages': messages, 'temperature': temperature, 'max_tokens': max_tokens})
+        if self.fail_times > 0:
+            self.fail_times -= 1
+            raise RuntimeError('fake llm failure')
+        self.last_usage = {'tokens_in': 100, 'tokens_out': 30}
+        return self.reply

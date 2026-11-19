@@ -41,6 +41,36 @@ class DashScopeImageProvider:
             return GeneratedAsset(image.content, 'image/png')
 
 
+class DashScopeLLMProvider:
+    """qwen-max 文本生成（初筛建议）。last_usage 供 ai_usage_logs 审计。"""
+
+    provider = 'dashscope'
+
+    def __init__(self, api_key: str, model: str = 'qwen-max', timeout: float = 60, transport=None):
+        self.api_key = api_key
+        self.model = model
+        self.timeout = timeout
+        self.transport = transport
+        self.last_usage: dict | None = None
+
+    async def chat(self, messages: list[dict], *, temperature: float = 0.3, max_tokens: int = 800) -> str:
+        payload = {'model': self.model, 'input': {'messages': messages},
+                   'parameters': {'result_format': 'message', 'temperature': temperature, 'max_tokens': max_tokens}}
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
+            response = await client.post(f'{DASHSCOPE_BASE}/services/aigc/text-generation/generation',
+                                         json=payload, headers={'Authorization': f'Bearer {self.api_key}'})
+            data = response.json()
+            if response.status_code != 200:
+                raise DashScopeError(f'llm chat failed: {data}')
+            try:
+                content = data['output']['choices'][0]['message']['content']
+            except (KeyError, IndexError, TypeError) as exc:
+                raise DashScopeError(f'llm chat returned no content: {data}') from exc
+            usage = data.get('usage') or {}
+            self.last_usage = {'tokens_in': usage.get('input_tokens'), 'tokens_out': usage.get('output_tokens')}
+            return content
+
+
 class DashScopeVideoProvider:
     def __init__(self, api_key: str, model: str = 'wanx2.1-i2v-turbo', timeout: float = 120,
                  poll_seconds: float = 5, max_wait_seconds: float = 480):

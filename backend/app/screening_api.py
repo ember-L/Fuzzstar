@@ -1,5 +1,6 @@
-"""健康初筛：规则硬判定 + 存档 + 存证媒体（FRD F05-1~5/7；LLM 建议属 T10）。"""
+"""健康初筛：规则硬判定 + 存档 + 存证媒体 + LLM 建议入队与降级（FRD F05-1~8）。"""
 import re
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
@@ -7,10 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.advice import template_advice
 from app.auth import APIError, get_db, utcnow
 from app.media import storage_unavailable
 from app.models import HealthEvent, HealthScreening, MediaUpload, Pet, ScreeningMedia, ScreeningSymptom, Task, User
 from app.pet_api import consented_user, owned_pet
+from app.tasks import enqueue_task
 from app.triage import RulesBundle, symptoms_config, triage, validate_answers
 
 router = APIRouter(prefix='/api/v1')
@@ -23,6 +26,7 @@ REDLINE_CARD = {
                     '疑似中毒请携带可疑物品包装,勿自行催吐', '勿擅自喂食人用药物'],
 }
 _MEDIA_ID = re.compile(r'^[0-9a-f]{32}$')
+ADVICE_TIMEOUT_SECONDS = 60  # 与移动端 screening_analysis 轮询超时一致
 
 
 def triage_rules(request: Request) -> RulesBundle:
@@ -30,6 +34,33 @@ def triage_rules(request: Request) -> RulesBundle:
     if bundle is None:
         raise APIError(503, 'CONFIG_UNAVAILABLE', '初筛规则暂不可用')
     return bundle
+
+
+def advice_templates(request: Request) -> dict:
+    templates = getattr(request.app.state, 'advice_templates', None)
+    if templates is None:
+        raise APIError(503, 'CONFIG_UNAVAILABLE', '建议模板暂不可用')
+    return templates
+
+
+def _advice_view(screening: HealthScreening, task: Optional[Task], templates: dict) -> dict:
+    """建议状态解析：LLM 就绪→ready；urgent 无任务模板→ready；失败/超时/耗尽→degraded 模板。"""
+    if screening.llm_advice is not None:
+        stored = screening.advice_json or {}
+        return {'status': 'ready', 'source': 'llm', 'text': screening.llm_advice, 'tips': stored.get('tips')}
+    stored = screening.advice_json
+    if stored and stored.get('source') == 'template':
+        status = 'ready' if screening.task_id is None else 'degraded'
+        return {'status': status, 'source': 'template', 'text': stored.get('text'), 'tips': stored.get('tips')}
+    fallback = template_advice(templates, screening.state)
+    degraded = {'status': 'degraded', 'source': 'template', 'text': fallback['text'], 'tips': fallback['tips']}
+    if task is None:
+        return degraded
+    if task.status == 'failed':
+        return degraded
+    if task.status in ('pending', 'running') and utcnow() - task.created_at > timedelta(seconds=ADVICE_TIMEOUT_SECONDS):
+        return degraded
+    return {'status': 'pending', 'source': None, 'text': None, 'tips': None}
 
 
 class SymptomInput(BaseModel):
@@ -76,7 +107,7 @@ def symptom_config(response: Response, _user: User = Depends(consented_user),
 @router.post('/pets/{pet_id}/screenings', status_code=201)
 def submit_screening(data: ScreeningInput, request: Request, response: Response, pet_id: int,
                      user: User = Depends(consented_user), db: Session = Depends(get_db),
-                     bundle: RulesBundle = Depends(triage_rules)):
+                     bundle: RulesBundle = Depends(triage_rules), templates: dict = Depends(advice_templates)):
     pet = owned_pet(pet_id, user, db)
     answers = {'spirit': data.spirit, 'appetite': data.appetite,
                'symptoms': [s.model_dump() for s in data.symptoms], 'redline_options': data.redline_options}
@@ -112,23 +143,31 @@ def submit_screening(data: ScreeningInput, request: Request, response: Response,
     if result['state'] != 'normal':
         db.add(HealthEvent(pet_id=pet.id, source='screening', source_id=screening.id, severity=result['state'],
                            score_delta=bundle.scoring['deltas'][result['state']], active=True))
+    if result['state'] == 'urgent':
+        # 红线零 LLM：立即持久化模板建议，不建任务、不记用量（AC-05-4）。
+        screening.advice_json = template_advice(templates, result['state'])
+    else:
+        task = enqueue_task(db, pet.id, 'screening_analysis', str(screening.id), {'screening_id': screening.id})
+        screening.task_id = task.id
     db.commit()
     response.headers['Cache-Control'] = 'no-store'
     return {'screening_id': screening.id, 'state': result['state'], 'redline_hit': result['redline_hit'],
             'redlines': result['redlines'], 'symptom_grades': result['symptom_grades'],
             'rules_version': result['rules_version'], 'redline_card': _card(result['state']),
-            'disclaimer': DISCLAIMER, 'created_at': screening.created_at.isoformat()}
+            'disclaimer': DISCLAIMER, 'task_id': screening.task_id, 'created_at': screening.created_at.isoformat()}
 
 
 @router.get('/screenings/{screening_id}')
 def screening_detail(response: Response, screening: HealthScreening = Depends(owned_screening),
-                     db: Session = Depends(get_db), bundle: RulesBundle = Depends(triage_rules)):
+                     db: Session = Depends(get_db), bundle: RulesBundle = Depends(triage_rules),
+                     templates: dict = Depends(advice_templates)):
     labels = {s['code']: s['label'] for s in bundle.symptoms['symptoms']}
     symptoms = db.scalars(select(ScreeningSymptom).where(ScreeningSymptom.screening_id == screening.id)
                           .order_by(ScreeningSymptom.id)).all()
     media = db.scalars(select(ScreeningMedia).where(ScreeningMedia.screening_id == screening.id)
                        .order_by(ScreeningMedia.id)).all()
     snapshot = screening.triage_json or {}
+    task = db.get(Task, screening.task_id) if screening.task_id else None
     response.headers['Cache-Control'] = 'no-store'
     return {'screening_id': screening.id, 'pet_id': screening.pet_id, 'state': screening.state,
             'redline_hit': screening.redline_hit, 'redlines': snapshot.get('redlines', []),
@@ -140,6 +179,7 @@ def screening_detail(response: Response, screening: HealthScreening = Depends(ow
             'symptom_grades': snapshot.get('symptom_grades', {}),
             'media': [{'media_id': m.media_id, 'type': m.type} for m in media],
             'redline_card': _card(screening.state), 'disclaimer': DISCLAIMER,
+            'task_id': screening.task_id, 'advice': _advice_view(screening, task, templates),
             'llm_advice': screening.llm_advice, 'advice_json': screening.advice_json}
 
 

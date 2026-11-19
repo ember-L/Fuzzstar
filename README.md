@@ -48,7 +48,7 @@ uvicorn app.main:create_dev_app --factory --host 127.0.0.1
 python -m arq app.worker.WorkerSettings
 ```
 
-worker 每 5 秒 sweep 一次：分发 pending 任务、回收过期租约、把耗尽重试的过期任务置为 failed，并清理过期未验证照片票据。单步失败按数据库 attempts 重试（初次 + 最多两次），arq 自身不重复重试。分身管线先生成底图，再为 7 个动作（idle/happy/sad/sick/crouch/look_left/look_right）各生成一条短片，单条失败不阻塞其余；≥5 条就绪判定可用。当前 Provider 为 DashScope（qwen-image-edit 底图 + wanx2.1-i2v-turbo 图生视频），真实生成质量、耗时与成本尚未验收；测试用 fake provider 已验证完整管线。
+worker 每 5 秒 sweep 一次：分发 pending 任务、回收过期租约、把耗尽重试的过期任务置为 failed，并清理过期未验证照片票据。单步失败按数据库 attempts 重试（初次 + 最多两次），arq 自身不重复重试。分身管线先生成底图，再为 7 个动作（idle/happy/sad/sick/crouch/look_left/look_right）各生成一条短片，单条失败不阻塞其余；≥5 条就绪判定可用。初筛建议任务（screening_analysis）调用 qwen-max 生成建议文本，失败重试耗尽后持久化状态档模板。当前 Provider 为 DashScope（qwen-image-edit 底图 + wanx2.1-i2v-turbo 图生视频 + qwen-max 建议），真实生成质量、耗时与成本尚未验收；测试用 fake provider 已验证完整管线。
 
 ### 5. 占位片库与动作映射
 
@@ -69,7 +69,9 @@ API 启动时加载占位库（可用 `PLACEHOLDER_DIR` 覆盖路径）与动作
 - `GET /api/v1/config/symptoms` 下发版本化问卷配置（选项、分档、追问适用项、红线选项）。
 - `POST /api/v1/pets/{pet_id}/screenings` 提交精神／食欲（必答）、症状多选及追问（时长必填，适用项频次必填，严重度开关与 ≤255 字备注）、红线选项与存证 `media_ids`。缺项返回 `400 VALIDATION_ERROR` 并在 `detail.fields` 定位错误项；存证照片 ≤3 张、视频 ≤1 段，须同猫已验证媒体。命中红线立即返回 `urgent` 与就医准备清单（附录 F 文案），零 LLM、不受配额限制；非红线按规则分级（单症状按追问，多症状取最高；明显沉郁或拒食单独就医）。
 - 每次提交存档答案、症状、`rules_version` 与判定快照（`triage_json`），同版本规则结果可复现；非 normal 结果写入健康事件（扣分供 T08 健康分聚合）。`GET /api/v1/screenings/{id}` 回看详情，`GET /api/v1/pets/{id}/screenings` 分页历史，`DELETE /api/v1/screenings/{id}/media/{media_id}` 删除存证（仍被其他记录或分身任务引用时只删关联，保留对象版本）。
-- LLM 护理建议、异步任务与降级模板属 T10，当前 `llm_advice` 为空。
+- 非 urgent 提交同时入队 `screening_analysis` 异步任务（幂等键为记录编号），由 worker 调用 qwen-max 仅生成观察／记录／就医建议文本，不参与分级、健康分与红线决策；输出约定 JSON（text + tips），解析失败或含「确诊」「治疗」措辞即判无效，按数据库 attempts 重试（初次 + 最多两次）。每次 LLM 调用（含失败尝试）写入 `ai_usage_logs` 审计。
+- 建议降级：任务失败或提交后 60 秒仍未就绪时，详情接口按状态档返回模板建议（`rules/advice_templates.yaml`，at-2026-11-19，随 `RULES_DIR` 加载，缺失返回 `503 CONFIG_UNAVAILABLE`），分级与存档不受影响；worker 重试耗尽也会持久化模板。urgent 红线不建任务、零 LLM、无用量记录，提交时即持久化模板建议。
+- 详情接口的 `advice` 字段为 `{status: pending|ready|degraded, source, text, tips}`：规则分级立即返回，建议就绪后填充；移动端结果页对 pending 按 60 秒轮询 `screening_analysis`，结束后重拉详情，degraded 显示模板并提示「AI 建议暂不可用」。真实 qwen-max 质量与成本仍待 `DASHSCOPE_API_KEY` 验收，测试用 fake provider 已验证完整链路。
 
 ### 7. 移动端 / 网页
 
@@ -83,7 +85,7 @@ npm run web
 
 Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机网页；真机需要可达的开发 API 地址，发布版只接受 HTTPS。原生端通过 SecureStore 保存刷新令牌；网页仅在内存保留会话，刷新页面需重新登录。「在此设备退出登录」仅清理本机令牌，不吊销服务端会话。
 
-「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片并中断轮询；照片验证后自动提交分身生成，首页舞台立即播放该体型的占位首帧（无需额外请求），随后每 2 秒轮询任务状态，页面不可见时暂停，10 分钟超时后停止轮询并提示（后台任务继续）。生成成功后个人片在下一个待机循环边界淡入替换占位片（300ms 淡出/淡入，动作播放中途不切换）；失败、超时或不足 5/7 动作时给出可理解的提示，并可在上传卡片「重试生成」。首页播放器按版本化动作映射（`GET /config/action-map`，本地缓存并按版本比对，挂载/回到前台/每 60 秒刷新）驱动：健康状态持续待机、情绪与点按/长按一次性动作播完回待机；单动作缺失或播放损坏逐级回退 个人片→占位片→静态底图呼吸缩放，断网无缓存不白屏。视频文件按内容版本缓存于本机（expo-sqlite 索引 + 文件系统，LRU 默认上限 200 MB）；网页端走浏览器 HTTP 缓存。「健康」页提供初筛入口：按猫开始问卷（动态追问、缺项定位、紧急信号勾选、照片／视频存证选择与上传），提交后展示规则结果、红线就医清单与免责声明，并可回看历史与删除存证。聊聊仍是占位；首页健康联动输入已预留，待 T08 接线；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。真机播放观感与缓存命中仍待设备验收。
+「我的」提供邮箱登录、当前版本协议确认和猫咪档案管理。登录并同意协议后，在首页选中猫咪 →「选择照片」→「确认上传」。切猫会清除待上传照片并中断轮询；照片验证后自动提交分身生成，首页舞台立即播放该体型的占位首帧（无需额外请求），随后每 2 秒轮询任务状态，页面不可见时暂停，10 分钟超时后停止轮询并提示（后台任务继续）。生成成功后个人片在下一个待机循环边界淡入替换占位片（300ms 淡出/淡入，动作播放中途不切换）；失败、超时或不足 5/7 动作时给出可理解的提示，并可在上传卡片「重试生成」。首页播放器按版本化动作映射（`GET /config/action-map`，本地缓存并按版本比对，挂载/回到前台/每 60 秒刷新）驱动：健康状态持续待机、情绪与点按/长按一次性动作播完回待机；单动作缺失或播放损坏逐级回退 个人片→占位片→静态底图呼吸缩放，断网无缓存不白屏。视频文件按内容版本缓存于本机（expo-sqlite 索引 + 文件系统，LRU 默认上限 200 MB）；网页端走浏览器 HTTP 缓存。「健康」页提供初筛入口：按猫开始问卷（动态追问、缺项定位、紧急信号勾选、照片／视频存证选择与上传），提交后展示规则结果、红线就医清单与免责声明；AI 护理建议异步填充（生成中提示、60 秒超时或失败显示状态档模板并标注「AI 建议暂不可用」），并可回看历史与删除存证。聊聊仍是占位；首页健康联动输入已预留，待 T08 接线；首页不会为未评估的猫咪生成健康分。首页素材源自 Figma，正式发布前需确认授权或替换。真机播放观感与缓存命中仍待设备验收。
 
 ## 本地 API 范围
 
@@ -103,8 +105,8 @@ Expo 开发工具也可用 `npm start` 启动。`127.0.0.1` 示例用于同机�
 | `GET /avatar/placeholders/{version}/{body_type}/{action}.mp4` | 占位片公开读取；版本化路径 immutable 缓存，白名单外 404 |
 | `GET /config/action-map` | 版本化动作映射（FRD 附录 C）；须登录并同意当前协议 |
 | `GET /config/symptoms` | 版本化初筛问卷配置（症状／分档／红线选项）；须登录并同意当前协议 |
-| `POST /pets/{id}/screenings` | 提交初筛：规则硬判定，201 返回状态／分级／红线卡／免责声明；缺项 400 定位错误项 |
-| `GET /screenings/{id}`、`GET /pets/{id}/screenings` | 初筛详情回看与历史（limit ≤50）；仅本人活跃猫咪 |
+| `POST /pets/{id}/screenings` | 提交初筛：规则硬判定，201 返回状态／分级／红线卡／免责声明／`task_id`（urgent 为 null）；缺项 400 定位错误项 |
+| `GET /screenings/{id}`、`GET /pets/{id}/screenings` | 初筛详情回看与历史（limit ≤50）；详情含 `advice`（pending/ready/degraded）；仅本人活跃猫咪 |
 | `DELETE /screenings/{id}/media/{media_id}` | 删除存证关联；无其他引用时连同对象版本删除 |
 | `GET /tasks/{task_id}` | 只读轮询；须登录并同意当前协议，只能查询本人活跃猫咪的任务。响应为 `task_id`、`type`、`status`、`result`，不返回内部请求载荷 |
 
@@ -141,6 +143,6 @@ REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p te
 E2E_SMOKE=1 REDIS_TEST_URL=redis://127.0.0.1:6390 python -m unittest discover -s tests -p test_e2e_smoke.py -v
 ```
 
-冒烟覆盖：登录→协议→建档→签名直传 MinIO→复核→提交分身（含幂等合并与占位清单）→占位片公开下载→动作映射→arq worker 生成→轮询到 succeeded 且 7/7 动作就绪→分身读取接口与签名播放地址下载→初筛（缺项定位、呕吐 >24h 派生红线 urgent＋就医卡、normal 无卡、详情／历史回看、存证删除的引用保护）。
+冒烟覆盖：登录→协议→建档→签名直传 MinIO→复核→提交分身（含幂等合并与占位清单）→占位片公开下载→动作映射→arq worker 生成→轮询到 succeeded 且 7/7 动作就绪→分身读取接口与签名播放地址下载→初筛（缺项定位、呕吐 >24h 派生红线 urgent＋就医卡＋模板即存零用量、normal 无卡、详情／历史回看、存证删除的引用保护）→建议异步链路（observe pending→fake LLM worker→ready＋ai_usage_logs 审计）。
 
-MySQL 8.4 已验证最新迁移（含 body_type 与初筛四表）、任务并发去重、认领与失败重排；MinIO 版本化桶已验证上传策略与版本固定；Redis/arq 已验证分发、租约回收与端到端冒烟（fake provider）；占位片库 21 条已按规格验收（h264/720p/无声/≤5s/首尾对齐）；初筛规则 22 项单测覆盖附录 A 分级表与附录 B 全部红线，视频存证经 ffprobe 双校验。生产 OSS 适配、真实 DashScope 生成、授权占位素材与 Figma 对照、真实 SMTP、正式协议、兽医评审、iOS/Android 真机及生产队列仍待验收。
+MySQL 8.4 已验证最新迁移（含 body_type、初筛四表与 ai_usage_logs）、任务并发去重、认领与失败重排；MinIO 版本化桶已验证上传策略与版本固定；Redis/arq 已验证分发、租约回收与端到端冒烟（fake provider）；占位片库 21 条已按规格验收（h264/720p/无声/≤5s/首尾对齐）；初筛规则 22 项单测覆盖附录 A 分级表与附录 B 全部红线，视频存证经 ffprobe 双校验；建议链路（入队、禁词拦截、重试耗尽模板、60 秒读时降级、用量审计）经 fake LLM 单测与 e2e 验证。生产 OSS 适配、真实 DashScope 生成与建议质量、授权占位素材与 Figma 对照、真实 SMTP、正式协议、兽医评审、iOS/Android 真机及生产队列仍待验收。

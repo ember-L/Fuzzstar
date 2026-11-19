@@ -19,15 +19,19 @@ import httpx
 from arq import Worker, cron
 from arq.connections import RedisSettings, create_pool
 from PIL import Image
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app import main, worker
+from app.advice import load_advice_templates
 from app.auth import utcnow
 from app.avatars import ACTIONS, S3Assets
 from app.identity import create_email_account, verify_email
-from app.models import Base
-from app.providers.fake import FakeImageProvider, FakeVideoProvider
+from app.models import AiUsageLog, Base
+from app.providers.fake import FakeImageProvider, FakeLLMProvider, FakeVideoProvider
+from app.triage import load_rules
+
+RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 
 
 @unittest.skipUnless(os.environ.get('E2E_SMOKE') == '1', 'requires MinIO + Redis smoke environment')
@@ -110,6 +114,9 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                     ctx['assets'] = S3Assets.from_env()
                     ctx['image_provider'] = FakeImageProvider()
                     ctx['video_provider'] = FakeVideoProvider()
+                    ctx['llm_provider'] = FakeLLMProvider()
+                    ctx['advice_templates'] = load_advice_templates(RULES_DIR)
+                    ctx['triage_rules'] = load_rules(RULES_DIR)
 
                 settings = RedisSettings.from_dsn(redis_url)
                 pool = await create_pool(settings)
@@ -176,10 +183,18 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('vomiting_persistent', record['redlines'])
                 self.assertEqual(record['redline_card']['title'], '建议立即就医')
                 self.assertEqual(record['disclaimer'], 'AI 结果仅供日常健康管理参考,不替代专业兽医诊断')
+                # T10：红线零 LLM——不建任务、模板即存、无用量记录。
+                self.assertIsNone(record['task_id'])
+                templates = load_advice_templates(RULES_DIR)
                 detail = await client.get(f"/api/v1/screenings/{record['screening_id']}", headers=headers)
                 detail.raise_for_status()
                 self.assertEqual(detail.json()['state'], 'urgent')
                 self.assertEqual(detail.json()['media'][0]['media_id'], media_id)
+                urgent_advice = detail.json()['advice']
+                self.assertEqual((urgent_advice['status'], urgent_advice['source']), ('ready', 'template'))
+                self.assertEqual(urgent_advice['text'], templates['states']['urgent']['text'])
+                with Session(worker_engine) as db:
+                    self.assertEqual(db.scalars(select(AiUsageLog)).all(), [])
                 history = await client.get(f'/api/v1/pets/{pet_id}/screenings', headers=headers)
                 history.raise_for_status()
                 self.assertEqual(history.json()['items'][0]['screening_id'], record['screening_id'])
@@ -188,12 +203,47 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(normal.status_code, 201)
                 self.assertEqual(normal.json()['state'], 'normal')
                 self.assertIsNone(normal.json()['redline_card'])
+                self.assertIsNotNone(normal.json()['task_id'])
                 removed = await client.delete(
                     f"/api/v1/screenings/{record['screening_id']}/media/{media_id}", headers=headers)
                 self.assertEqual(removed.status_code, 204)
                 # 照片仍被分身任务引用：只删关联，对象版本保留。
                 still = await client.get(f'/api/v1/media/{media_id}', headers=headers)
                 self.assertEqual(still.status_code, 200)
+
+                # T10：非红线建议异步生成——pending → worker(fake LLM) → ready + 用量审计。
+                observe = await client.post(f'/api/v1/pets/{pet_id}/screenings', headers=headers, json={
+                    'spirit': 'normal', 'appetite': 'normal',
+                    'symptoms': [{'code': 'vomiting', 'duration': '2-12h', 'frequency': '2-3'}],
+                    'redline_options': [], 'media_ids': []})
+                observe.raise_for_status()
+                observe_record = observe.json()
+                self.assertEqual(observe_record['state'], 'observe')
+                observe_task = observe_record['task_id']
+                self.assertIsNotNone(observe_task)
+                before = await client.get(f"/api/v1/screenings/{observe_record['screening_id']}", headers=headers)
+                before.raise_for_status()
+                self.assertEqual(before.json()['advice']['status'], 'pending')
+                pool2 = await create_pool(settings)
+                await worker.sweep({'engine': worker_engine, 'redis': pool2})
+                runner2 = Worker([worker.run_task], redis_settings=settings, redis_pool=pool2,
+                                 max_tries=1, burst=True, poll_delay=0.05, on_startup=on_startup)
+                await runner2.async_run()
+                await pool2.aclose()
+                after_task = await client.get(f'/api/v1/tasks/{observe_task}', headers=headers)
+                after_task.raise_for_status()
+                self.assertEqual(after_task.json()['status'], 'succeeded')
+                after = await client.get(f"/api/v1/screenings/{observe_record['screening_id']}", headers=headers)
+                after.raise_for_status()
+                advice = after.json()['advice']
+                self.assertEqual((advice['status'], advice['source']), ('ready', 'llm'))
+                self.assertEqual(advice['text'], '建议观察精神与食欲变化。')
+                self.assertEqual(advice['tips'], ['记录变化'])
+                with Session(worker_engine) as db:
+                    logs = db.scalars(select(AiUsageLog).where(AiUsageLog.task_id == observe_task)).all()
+                    self.assertEqual(len(logs), 1)
+                    self.assertEqual((logs[0].kind, logs[0].provider, logs[0].tokens_in, logs[0].tokens_out),
+                                     ('llm', 'fake', 100, 30))
 
 
 if __name__ == '__main__':

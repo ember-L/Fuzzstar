@@ -19,6 +19,7 @@ from app.pet_api import router as pet_router
 from app.placeholders import load_library
 from app.screening_api import router as screening_router
 from app.task_api import router as task_router
+from app.advice import load_advice_templates
 from app.triage import load_rules
 
 
@@ -63,6 +64,7 @@ def create_dev_app():
     rules_dir = Path(os.environ.get('RULES_DIR') or Path(__file__).resolve().parents[1] / 'rules')
     instance.state.action_map = load_action_map(rules_dir)
     instance.state.triage_rules = load_rules(rules_dir)
+    instance.state.advice_templates = load_advice_templates(rules_dir)
     placeholder_dir = Path(os.environ.get('PLACEHOLDER_DIR') or Path(__file__).resolve().parents[1] / 'assets' / 'placeholders')
     instance.state.placeholder_library = load_library(placeholder_dir)
     instance.get('/api/v1/health')(health)

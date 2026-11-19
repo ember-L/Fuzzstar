@@ -7,16 +7,19 @@ reclaims expired leases every 5 seconds, so a Redis outage never loses a task.
 import asyncio
 import os
 from datetime import timedelta
+from pathlib import Path
 
 from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import create_engine, delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
 from app.auth import utcnow
 from app.avatars import S3Assets, generate_avatar
 from app.models import MediaUpload, Task
 from app.tasks import MAX_ATTEMPTS, claim_task, finish_task
+from app.triage import load_rules
 
 MEDIA_CLEANUP_GRACE = timedelta(hours=1)
 
@@ -42,13 +45,22 @@ async def run_task(ctx, task_id):
     attempt = await asyncio.to_thread(_claim, ctx['engine'], task_id)
     if attempt is None:
         return
+    task = None
     try:
         task, media = await asyncio.to_thread(_load, ctx['engine'], task_id)
-        if task.type != 'avatar_batch':
+        if task.type == 'avatar_batch':
+            result = await generate_avatar(task, media, assets=ctx['assets'],
+                                           image_provider=ctx['image_provider'], video_provider=ctx['video_provider'])
+        elif task.type == 'screening_analysis':
+            result = await analyze_screening(ctx['engine'], task, llm_provider=ctx['llm_provider'],
+                                             templates=ctx['advice_templates'], rules=ctx.get('triage_rules'))
+        else:
             raise ValueError(f'unsupported task type: {task.type}')
-        result = await generate_avatar(task, media, assets=ctx['assets'],
-                                       image_provider=ctx['image_provider'], video_provider=ctx['video_provider'])
     except Exception:
+        if task is not None and task.type == 'screening_analysis':
+            await asyncio.to_thread(record_llm_failure, ctx['engine'], task_id, ctx['llm_provider'])
+            if attempt >= MAX_ATTEMPTS:
+                await asyncio.to_thread(apply_template_fallback, ctx['engine'], task_id, ctx['advice_templates'])
         await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, None)
         return
     await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, result)
@@ -79,20 +91,26 @@ async def sweep(ctx):
 
 
 def _providers_from_env():
-    from app.providers.dashscope import DashScopeImageProvider, DashScopeVideoProvider
+    from app.providers.dashscope import DashScopeImageProvider, DashScopeLLMProvider, DashScopeVideoProvider
     key = os.environ.get('DASHSCOPE_API_KEY', '')
     if not key:
-        raise RuntimeError('DASHSCOPE_API_KEY is required for the avatar worker')
-    return DashScopeImageProvider(key), DashScopeVideoProvider(key)
+        raise RuntimeError('DASHSCOPE_API_KEY is required for the worker')
+    return DashScopeImageProvider(key), DashScopeVideoProvider(key), DashScopeLLMProvider(key)
 
 
 async def startup(ctx):
     ctx['engine'] = create_engine(os.environ['DATABASE_URL'], hide_parameters=True)
     assets = S3Assets.from_env()
     if assets is None:
-        raise RuntimeError('MEDIA_S3_* settings are required for the avatar worker')
+        raise RuntimeError('MEDIA_S3_* settings are required for the worker')
     ctx['assets'] = assets
-    ctx['image_provider'], ctx['video_provider'] = _providers_from_env()
+    ctx['image_provider'], ctx['video_provider'], ctx['llm_provider'] = _providers_from_env()
+    rules_dir = Path(os.environ.get('RULES_DIR') or Path(__file__).resolve().parents[1] / 'rules')
+    templates = load_advice_templates(rules_dir)
+    if templates is None:
+        raise RuntimeError('advice_templates.yaml is required for screening fallback')
+    ctx['advice_templates'] = templates
+    ctx['triage_rules'] = load_rules(rules_dir)
 
 
 async def shutdown(ctx):
