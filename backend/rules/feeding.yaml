@@ -1,0 +1,13 @@
+# 附录 E：喂养参考公式与系数（公开营养学参考，可调）
+version: fd-2026-11-19
+rer_factor: 70
+rer_exponent: 0.75
+coefficients:
+  kitten_under_4m: 3.0
+  kitten_4_12m: 2.0
+  adult_neutered: 1.2
+  adult_intact: 1.4
+  senior: 1.1
+densities:
+  dry: 3.8
+  wet: 0.9

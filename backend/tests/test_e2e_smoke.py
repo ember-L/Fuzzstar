@@ -264,6 +264,32 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((final_health.json()['state'], final_health.json()['score']), ('observe', 90))
                 self.assertEqual(final_health.json()['latest_screening']['screening_id'], observe_record['screening_id'])
 
+                # T12：饮食快录→日聚合→删除重算→首页同源→喂养参考（无体重给引导）。
+                diet = await client.post(f'/api/v1/pets/{pet_id}/diet', headers=headers,
+                                         json={'food_type': 'dry', 'amount_g': 50})
+                self.assertEqual(diet.status_code, 201)
+                self.assertEqual(diet.json()['kcal_est'], 190.0)
+                snack = await client.post(f'/api/v1/pets/{pet_id}/diet', headers=headers,
+                                          json={'food_type': 'snack', 'amount_g': 20})
+                snack.raise_for_status()
+                self.assertIsNone(snack.json()['kcal_est'])
+                daily = await client.get(f'/api/v1/pets/{pet_id}/diet', headers=headers,
+                                         params={'date': utcnow().date().isoformat(), 'tz_offset_minutes': 0})
+                daily.raise_for_status()
+                self.assertEqual((daily.json()['total_g'], daily.json()['total_kcal'], daily.json()['count']),
+                                 (70.0, 190.0, 2))
+                diet_health = await client.get(f'/api/v1/pets/{pet_id}/health', headers=headers)
+                diet_health.raise_for_status()
+                self.assertEqual(diet_health.json()['diet_today']['count'], 2)
+                self.assertEqual(diet_health.json()['diet_today']['total_kcal'], 190.0)
+                deleted = await client.delete(f"/api/v1/pets/{pet_id}/diet/{snack.json()['id']}", headers=headers)
+                self.assertEqual(deleted.status_code, 204)
+                reference = await client.get(f'/api/v1/pets/{pet_id}/feeding-reference', headers=headers)
+                reference.raise_for_status()
+                self.assertFalse(reference.json()['has_weight'])
+                self.assertEqual(reference.json()['disclaimer'],
+                                 '以上为公开营养学公式换算的参考值,非医嘱;请结合体况与兽医建议调整。')
+
 
 if __name__ == '__main__':
     unittest.main()
