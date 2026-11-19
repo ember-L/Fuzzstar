@@ -14,6 +14,7 @@ import { emotionBus } from '../../lib/chat-emotion';
 import { getOfflineStore } from '../../lib/offline-store';
 import { offlineSync } from '../../lib/offline-sync';
 import { uploadMedia } from '../../lib/photo-upload';
+import { QUOTA_EXHAUSTED_HINT, canUse, type QuotaSnapshot } from '../../lib/quota';
 import { classifyFailure, generateKey } from '../../lib/retry-queue';
 import { ApiError } from '../../lib/session';
 import { pollTask, type TaskSnapshot } from '../../lib/task-poller';
@@ -37,6 +38,7 @@ export default function ChatScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
+  const [quota, setQuota] = useState<QuotaSnapshot>();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const audioAbort = useRef<AbortController | null>(null);
   const autoStop = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,6 +83,7 @@ export default function ChatScreen() {
     api.authorized<{ id: number; name: string }[]>('/pets').then(items => {
       if (active) setPets(items);
     }).catch(() => { if (active) setPets([]); });
+    api.authorized<QuotaSnapshot>('/quota').then(snapshot => { if (active) setQuota(snapshot); }).catch(() => {});
     void offlineSync.drainNow();
     return () => { active = false; };
   }, []));
@@ -318,6 +321,7 @@ export default function ChatScreen() {
       {recorderState.isRecording ? (
         <Text accessibilityLiveRegion="polite" style={styles.recordingBanner}>录音中… 点 ⏹ 停止并解读（最长 {AUDIO_MAX_SECONDS} 秒）</Text>
       ) : null}
+      {!canUse(quota, 'chat_msg') ? <Text style={styles.notice}>{QUOTA_EXHAUSTED_HINT}（录音解读不占聊天配额。）</Text> : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.inputRow}>
           <Pressable onPress={() => void toggleRecording()} disabled={recordingBusy} accessibilityRole="button"
@@ -337,8 +341,9 @@ export default function ChatScreen() {
             maxLength={CHAT_INPUT_MAX}
             accessibilityLabel="聊天输入框"
           />
-          <Pressable onPress={() => void submit()} disabled={busy || !input.trim()} accessibilityRole="button"
-            style={[styles.send, (busy || !input.trim()) && styles.sendDisabled]}>
+          <Pressable onPress={() => void submit()} disabled={busy || !input.trim() || !canUse(quota, 'chat_msg')} accessibilityRole="button"
+            accessibilityState={{ disabled: busy || !input.trim() || !canUse(quota, 'chat_msg') }}
+            style={[styles.send, (busy || !input.trim() || !canUse(quota, 'chat_msg')) && styles.sendDisabled]}>
             {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.sendText}>发送</Text>}
           </Pressable>
         </View>

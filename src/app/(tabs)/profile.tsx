@@ -3,12 +3,15 @@ import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-nat
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
 import { cancelPetFeeding, cancelPetRechecks, getPermissionState, requestPermission, type PermissionState } from '../../lib/notifications';
+import { DELETION_CONFIRM_LABEL, DELETION_NOTICE, TRAINING_NOTICE, entitlementSummary, trainingConsentBody } from '../../lib/account';
+import { QUOTA_EXHAUSTED_HINT, quotaEntries, type QuotaSnapshot } from '../../lib/quota';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
 
 type Profile = { id: number; nickname: string };
 type Policy = { privacy: string; terms: string };
-type Consent = { required: Policy; links: Policy; granted: boolean };
+type Consent = { required: Policy; links: Policy; granted: boolean; training_granted: boolean };
+type Entitlement = { plan: string; status: string; message: string };
 const emptyPet = { name: '', breed: '', sex: 'unknown' as 'unknown' | 'male' | 'female', birth_date: '', neutered: false };
 type Pet = Omit<typeof emptyPet, 'breed' | 'birth_date'> & { id: number; breed: string | null; birth_date: string | null };
 
@@ -37,6 +40,10 @@ export default function ProfileScreen() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState<PermissionState>('undetermined');
+  const [quota, setQuota] = useState<QuotaSnapshot>();
+  const [entitlement, setEntitlement] = useState<Entitlement>();
+  const [trainingAsk, setTrainingAsk] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     getPermissionState().then(setNotificationPermission).catch(() => {});
@@ -49,6 +56,10 @@ export default function ProfileScreen() {
     setEditing(undefined);
     setRemoving(undefined);
     setDraft(emptyPet);
+    setQuota(undefined);
+    setEntitlement(undefined);
+    setTrainingAsk(false);
+    setDeleting(false);
   }
 
   async function load() {
@@ -56,6 +67,8 @@ export default function ProfileScreen() {
     const state = await api.authorized<Consent>('/consents');
     setConsent(state);
     setPets(state.granted ? await api.authorized<Pet[]>('/pets') : []);
+    setQuota(await api.authorized<QuotaSnapshot>('/quota'));
+    setEntitlement(await api.authorized<Entitlement>('/me/entitlement'));
   }
 
   useEffect(() => {
@@ -198,6 +211,66 @@ export default function ProfileScreen() {
                 setNotificationPermission(await requestPermission());
               })} />
             ) : null}
+          </View>
+          <View style={styles.card}>
+            <Text accessibilityRole="header" style={styles.heading}>今日用量</Text>
+            {quotaEntries(quota).map(entry => (
+              <Text key={entry.metric} style={styles.text}>{entry.label}：{entry.used}/{entry.limit}{entry.exhausted ? ' · ' + QUOTA_EXHAUSTED_HINT : ''}</Text>
+            ))}
+            {!quota ? <Text style={styles.text}>用量加载中…</Text> : null}
+          </View>
+          <View style={styles.card}>
+            <Text accessibilityRole="header" style={styles.heading}>会员权益</Text>
+            <Text style={styles.text}>{entitlementSummary(entitlement)}</Text>
+            <Text style={styles.text}>测试期不提供付费功能，所有权益免费开放。</Text>
+          </View>
+          <View style={styles.card}>
+            <Text accessibilityRole="header" style={styles.heading}>训练数据授权</Text>
+            {consent?.training_granted ? (
+              <>
+                <Text style={styles.text}>已允许将匿名使用数据用于模型训练。</Text>
+                <Action label="撤销训练授权" disabled={busy} onPress={() => void run(async () => {
+                  await api.authorized('/consents/training', json('POST', trainingConsentBody(false)));
+                  await load();
+                })} />
+              </>
+            ) : trainingAsk ? (
+              <>
+                <Text style={styles.text}>{TRAINING_NOTICE}</Text>
+                <Action label="确认授权" disabled={busy} onPress={() => void run(async () => {
+                  await api.authorized('/consents/training', json('POST', trainingConsentBody(true)));
+                  setTrainingAsk(false);
+                  await load();
+                })} />
+                <Action label="不允许" disabled={busy} onPress={() => void run(async () => {
+                  await api.authorized('/consents/training', json('POST', trainingConsentBody(false)));
+                  setTrainingAsk(false);
+                  await load();
+                })} />
+              </>
+            ) : (
+              <>
+                <Text style={styles.text}>默认不允许。授权与否都不影响任何功能。</Text>
+                <Action label="设置训练授权" disabled={busy || !consent?.granted} onPress={() => setTrainingAsk(true)} />
+              </>
+            )}
+          </View>
+          <View style={styles.card}>
+            <Text accessibilityRole="header" style={styles.heading}>注销账号</Text>
+            {deleting ? (
+              <>
+                <Text style={styles.text}>{DELETION_NOTICE}</Text>
+                <Action label={DELETION_CONFIRM_LABEL} disabled={busy} onPress={() => void run(async () => {
+                  await api.authorized('/me', { method: 'DELETE' });
+                  await api.clear();
+                  resetProfile();
+                  setNotice('注销申请已提交：账号已冻结，15 天后数据将被物理清除。');
+                })} />
+                <Action label="取消注销" onPress={() => setDeleting(false)} />
+              </>
+            ) : (
+              <Action label="申请注销账号" disabled={busy} onPress={() => setDeleting(true)} />
+            )}
           </View>
           <Action label="在此设备退出登录" disabled={busy} onPress={() => void run(async () => {
             await api.clear();

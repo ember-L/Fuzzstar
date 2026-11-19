@@ -6,13 +6,15 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../lib/api';
 import type { PlaceholderManifest } from '../lib/avatar';
 import { PhotoUploadError, uploadPhoto } from '../lib/photo-upload';
+import { QUOTA_EXHAUSTED_HINT } from '../lib/quota';
 import { ApiError } from '../lib/session';
 import { colors } from '../theme';
 import type { Submission } from './AvatarStage';
 
-export function PhotoUpload({ pet, onSubmitted }: {
+export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
   pet: { id: number; name: string };
   onSubmitted?: (submission: Submission) => void;
+  quotaExhausted?: boolean;
 }) {
   const [photo, setPhoto] = useState<{ file: Blob; name: string }>();
   const [message, setMessage] = useState('');
@@ -107,7 +109,8 @@ export function PhotoUpload({ pet, onSubmitted }: {
     }
   }
 
-  const canRetry = Boolean(lastMediaId) && !busy;
+  const canRetry = Boolean(lastMediaId) && !busy && !quotaExhausted;
+  const submitDisabled = busy || quotaExhausted;
 
   return (
     <View style={styles.card}>
@@ -119,8 +122,8 @@ export function PhotoUpload({ pet, onSubmitted }: {
           onPress={pick} style={[styles.button, busy && styles.disabled]}>
           <Text style={styles.title}>{photo ? '重新选择' : '选择照片'}</Text>
         </Pressable>
-        {photo ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
-          onPress={submit} style={[styles.button, styles.primary, busy && styles.disabled]}>
+        {photo ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitDisabled }} disabled={submitDisabled}
+          onPress={submit} style={[styles.button, styles.primary, submitDisabled && styles.disabled]}>
           <Text style={styles.title}>确认上传</Text>
         </Pressable> : null}
         {canRetry ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
@@ -128,6 +131,7 @@ export function PhotoUpload({ pet, onSubmitted }: {
           <Text style={styles.title}>重试生成</Text>
         </Pressable> : null}
       </View>
+      {quotaExhausted ? <Text style={styles.note}>{QUOTA_EXHAUSTED_HINT}</Text> : null}
       {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
     </View>
   );

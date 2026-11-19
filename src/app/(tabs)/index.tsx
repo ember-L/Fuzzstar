@@ -2,12 +2,14 @@ import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AvatarStage, type Submission } from '../../components/AvatarStage';
+import { GifExport } from '../../components/GifExport';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
 import { emotionBus } from '../../lib/chat-emotion';
 import { tzOffsetMinutes } from '../../lib/diet';
 import { formatDateTime, isUrgent, scoreDisplay, stateLabel, totalEffective, type HealthSummary } from '../../lib/health';
+import { canUse, type QuotaSnapshot } from '../../lib/quota';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
 
@@ -28,6 +30,7 @@ export default function HomeScreen() {
   const [health, setHealth] = useState<HealthSummary | null>(null);
   const [showDeductions, setShowDeductions] = useState(false);
   const [emotionEvent, setEmotionEvent] = useState<{ id: string; petId: number; emotion: string } | null>(null);
+  const [quota, setQuota] = useState<QuotaSnapshot>();
   // F09-5：聊聊页回复情绪→仅当前选中猫的分身播一次对应动作后回待机。
   useEffect(() => emotionBus.subscribe(event => setEmotionEvent({ id: String(event.id), petId: event.petId, emotion: event.emotion })), []);
   const selected = pets.find(pet => pet.id === selectedId) ?? pets[0];
@@ -41,6 +44,7 @@ export default function HomeScreen() {
         setLoadError(!(error instanceof ApiError && (error.status === 401 || error.status === 403)));
       }
     });
+    api.authorized<QuotaSnapshot>('/quota').then(snapshot => { if (active) setQuota(snapshot); }).catch(() => {});
     return () => { active = false; setPets([]); setLoadError(false); };
   }, []));
   // 健康聚合随焦点与切猫重拉（AC-02-4 / AC-04-1 刷新一致性）。
@@ -175,8 +179,9 @@ export default function HomeScreen() {
       </View>
       {selected ? <Link href="/chat" style={styles.chatLink}>和我聊聊</Link> : null}
       {selected ? <Link href={'/timeline/' + selected.id} style={styles.chatLink}>健康时间线</Link> : null}
-      {selected ? <PhotoUpload key={selected.id} pet={selected}
+      {selected ? <PhotoUpload key={selected.id} pet={selected} quotaExhausted={!canUse(quota, 'avatar_gen')}
         onSubmitted={next => setSubmission({ petId: selected.id, ...next })} /> : null}
+      {selected ? <GifExport key={'gif-' + selected.id} pet={selected} /> : null}
       {loadError ? <Text accessibilityLiveRegion="polite" style={styles.note}>暂时无法加载猫咪档案。</Text> : null}
       {!selected ? <Link href="/profile" style={styles.profileLink}>前往「我的」管理猫咪档案</Link> : null}
     </Screen>

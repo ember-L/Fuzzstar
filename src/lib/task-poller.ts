@@ -6,7 +6,7 @@ export const TASK_TIMEOUTS_MS: Record<string, number> = {
   gif_export: 60_000,
 };
 
-export type TaskSnapshot = { task_id: string; type: string; status: string; result: unknown };
+export type TaskSnapshot = { task_id: string; type: string; status: string; result: unknown; download_url?: string | null };
 export type PollOutcome =
   | { kind: 'settled'; task: TaskSnapshot }
   | { kind: 'timeout' }
