@@ -64,3 +64,25 @@ test('storage success without a matching verified response is not reported as su
     ? { media_id: mediaId, upload } : { media_id: mediaId, status: 'pending' },
   async () => new Response(null, { status: 204 }), signal()), /未确认/);
 });
+test('audio recordings upload with kind audio and the recording content type', async () => {
+  const { uploadMedia } = await import('../src/lib/photo-upload.ts');
+  const recording = new Blob(['audio-bytes'], { type: 'audio/mp4' });
+  const calls = [];
+  const result = await uploadMedia(2, recording, 'audio', async (path, init) => {
+    calls.push(path);
+    if (path === '/media/presign') {
+      assert.deepEqual(JSON.parse(init.body), { pet_id: 2, kind: 'audio', content_type: 'audio/mp4', size_bytes: recording.size });
+      return { media_id: mediaId, upload };
+    }
+    return { media_id: mediaId, status: 'verified' };
+  }, async (url) => { calls.push(url); return new Response(null, { status: 204 }); }, signal());
+  assert.equal(result, mediaId);
+  assert.deepEqual(calls, ['/media/presign', upload.url, `/media/${mediaId}/complete`]);
+});
+
+test('unsupported or oversized audio never reaches presign', async () => {
+  const { uploadMedia } = await import('../src/lib/photo-upload.ts');
+  for (const file of [new Blob(['x'], { type: 'audio/ogg' }), { type: 'audio/mp4', size: 10 * 1024 * 1024 + 1 }]) {
+    await assert.rejects(uploadMedia(2, file, 'audio', assert.fail, assert.fail, signal()), /10 MiB/);
+  }
+});

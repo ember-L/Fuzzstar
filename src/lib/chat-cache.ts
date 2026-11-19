@@ -6,6 +6,10 @@ export interface CachedMessage {
   role: 'user' | 'pet';
   kind: 'text' | 'audio';
   content: string;
+  audioUrl?: string | null;
+  emotionLabel?: string | null;
+  emotionConfidence?: number | null;
+  taskId?: string | null;
   createdAt: number;
   pending: boolean;
 }

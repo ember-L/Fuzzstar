@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View
 import { Screen } from '../../components/Screen';
 import { api } from '../../lib/api';
 import { cancelPetRechecks } from '../../lib/notifications';
-import { MediaUploadError, uploadMedia, type MediaKind } from '../../lib/photo-upload';
+import { MediaUploadError, uploadMedia } from '../../lib/photo-upload';
 import { buildPayload, emptyForm, mediaLimitError, missingFields, type ScreeningForm, type SymptomsConfig } from '../../lib/screening';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
@@ -15,7 +15,7 @@ const APPETITE_LABELS: Record<string, string> = { normal: '食欲正常', decrea
 const DURATION_LABELS: Record<string, string> = { '<2h': '不到 2 小时', '2-12h': '2–12 小时', '12-24h': '12–24 小时', '>24h': '超过 24 小时' };
 const FREQUENCY_LABELS: Record<string, string> = { '1': '1 次', '2-3': '2–3 次', '4-6': '4–6 次', '>6': '超过 6 次' };
 
-type PendingMedia = { key: string; kind: MediaKind; uri: string; file: Blob };
+type PendingMedia = { key: string; kind: 'photo' | 'video'; uri: string; file: Blob };
 
 export default function ScreeningScreen() {
   const { petId } = useLocalSearchParams<{ petId: string }>();
@@ -59,7 +59,7 @@ export default function ScreeningScreen() {
       ? prev.redlineOptions.filter(item => item !== code) : [...prev.redlineOptions, code] }));
   };
 
-  const pickMedia = async (kind: MediaKind) => {
+  const pickMedia = async (kind: 'photo' | 'video') => {
     if (busy) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: kind === 'photo' ? ['images'] : ['videos'],

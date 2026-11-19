@@ -1,22 +1,28 @@
-// 聊聊页（T15，FRD F09-1/2/5/6/7）：每宠一线程、同步人设回复、红线就医卡、
-// 常驻免责、chat_cache 弱网镜像、文字失败入 retry_queue 自动补发（幂等键防重）。
+// 聊聊页（T15/T16，FRD F09-1/2/3/4/5/6/7）：每宠一线程、同步人设回复、红线就医卡、
+// 录音解读（1–60s→audio_interpret 45s 轮询→情绪+置信度气泡）、常驻免责、
+// chat_cache 弱网镜像、文字失败入 retry_queue 自动补发（幂等键防重；音频不入队）。
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
+import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import { api } from '../../lib/api';
+import { AUDIO_FOOTER, AUDIO_MAX_SECONDS, confidenceText, emotionLabel, recordingContentType, validateDuration } from '../../lib/audio-message';
 import { CHAT_INPUT_MAX, chatQueueItem, confirmSend, localPendingId, parseChatBody, toCachedMessage, validateChatInput, type ChatGuidance, type ChatMessage } from '../../lib/chat';
 import { mergeMessages, type CachedMessage } from '../../lib/chat-cache';
 import { emotionBus } from '../../lib/chat-emotion';
 import { getOfflineStore } from '../../lib/offline-store';
 import { offlineSync } from '../../lib/offline-sync';
+import { uploadMedia } from '../../lib/photo-upload';
 import { classifyFailure, generateKey } from '../../lib/retry-queue';
 import { ApiError } from '../../lib/session';
+import { pollTask, type TaskSnapshot } from '../../lib/task-poller';
 import { colors } from '../../theme';
 
 const DISCLAIMER = 'AI 结果仅供日常健康管理参考,不替代专业兽医诊断';
 
 interface SendResult { user_message: ChatMessage; pet_message: ChatMessage; guidance: ChatGuidance | null }
+interface AudioSendResult { task_id: string; user_message: ChatMessage; pet_message: null; guidance: null }
 
 export default function ChatScreen() {
   const [pets, setPets] = useState<{ id: number; name: string }[]>([]);
@@ -29,7 +35,15 @@ export default function ChatScreen() {
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
+  const audioAbort = useRef<AbortController | null>(null);
+  const autoStop = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordStart = useRef(0);
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
+  const recorderState = useAudioRecorderState(recorder);
+  const player = useAudioPlayer(playingUrl ? { uri: playingUrl } : null);
   const selected = pets.find(pet => pet.id === selectedId) ?? pets[0];
   const selectedPetId = selected?.id;
   const pendingCount = messages.filter(message => message.pending).length;
@@ -82,14 +96,14 @@ export default function ChatScreen() {
     }
   }, [loadHistory]);
 
-  // 切猫隔离（AC-09-1）：每宠独立线程，自动创建。
+  // 切猫隔离（AC-09-1）：每宠独立线程，自动创建；中止进行中的录音轮询。
   useEffect(() => {
     if (!selectedPetId) {
       void Promise.resolve().then(() => { setSessionId(null); setMessages([]); });
       return;
     }
     let active = true;
-    void Promise.resolve().then(() => { setGuidance(null); setNextBefore(null); });
+    void Promise.resolve().then(() => { setGuidance(null); setNextBefore(null); setPlayingUrl(null); });
     void Promise.resolve().then(() => loadHistory(selectedPetId, null));
     void Promise.resolve().then(() => openSession(selectedPetId, () => active));
     return () => { active = false; };
@@ -103,6 +117,20 @@ export default function ChatScreen() {
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages.length]);
+
+  // 切猫/卸载：中止音频轮询、清理自动停止定时器、停止录音。
+  useEffect(() => {
+    return () => {
+      audioAbort.current?.abort();
+      if (autoStop.current) { clearTimeout(autoStop.current); autoStop.current = null; }
+      if (recorder.isRecording) void recorder.stop();
+    };
+  }, [selectedPetId, recorder]);
+
+  // 共享播放器：点击语音气泡切换音源并从头播放。
+  useEffect(() => {
+    if (playingUrl) { player.seekTo(0); player.play(); }
+  }, [playingUrl, player]);
 
   const loadMore = async () => {
     if (!selected || sessionId === null || nextBefore === null || loadingMore) return;
@@ -155,6 +183,77 @@ export default function ChatScreen() {
     }
   };
 
+  // F09-3/4：停止录音→时长校验→presign 上传→音频消息 202→45s 轮询→刷新双气泡。
+  const stopAndSend = useCallback(async () => {
+    if (autoStop.current) { clearTimeout(autoStop.current); autoStop.current = null; }
+    if (!recorder.isRecording) return;
+    await recorder.stop();
+    const uri = recorder.uri;
+    const seconds = (Date.now() - recordStart.current) / 1000;
+    const checked = validateDuration(seconds);
+    if (!checked.ok) { setNotice(checked.message); return; }
+    if (!selectedPetId || sessionId === null || !uri) { setNotice('聊天线程尚未就绪，录音未发送。'); return; }
+    const petId = selectedPetId;
+    const sid = sessionId;
+    setRecordingBusy(true);
+    setNotice(null);
+    const controller = new AbortController();
+    audioAbort.current = controller;
+    try {
+      const raw = await (await fetch(uri)).blob();
+      const file = new Blob([raw], { type: recordingContentType(uri) });
+      const mediaId = await uploadMedia(petId, file, 'audio', api.authorized, (url, init) => fetch(url, init), controller.signal);
+      const result = await api.authorized<AudioSendResult>(`/chat/sessions/${sid}/messages`, {
+        method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'audio', media_id: mediaId }),
+      });
+      const store = await getOfflineStore();
+      setMessages(prev => mergeMessages(prev, [toCachedMessage(result.user_message)]));
+      await store.chat.put(petId, [toCachedMessage(result.user_message)]);
+      const outcome = await pollTask(result.task_id, 'audio_interpret', {
+        fetchTask: id => api.authorized<TaskSnapshot>(`/tasks/${id}`),
+        signal: controller.signal,
+        isVisible: () => AppState.currentState === 'active',
+      });
+      if (outcome.kind === 'aborted') return;
+      if (outcome.kind === 'settled' && outcome.task.status === 'succeeded') {
+        const emotion = (outcome.task.result as { emotion?: string } | null)?.emotion;
+        if (emotion && emotion !== 'unrecognized') emotionBus.publish(petId, emotion);
+        await loadHistory(petId, sid);
+      } else {
+        setNotice('音频解读未成功，请稍后重试；文字聊天不受影响。');
+        await loadHistory(petId, sid);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setNotice(error instanceof ApiError ? error.message : '录音上传失败，请重试；文字聊天不受影响。');
+    } finally {
+      setRecordingBusy(false);
+      audioAbort.current = null;
+    }
+  }, [recorder, selectedPetId, sessionId, loadHistory]);
+
+  const toggleRecording = async () => {
+    if (Platform.OS === 'web') { setNotice('网页端暂不支持录音，请使用 App；文字聊天不受影响。'); return; }
+    if (recorder.isRecording) { await stopAndSend(); return; }
+    if (recordingBusy) return;
+    if (!selectedPetId || sessionId === null) { setNotice('聊天线程尚未就绪，请稍后再试。'); return; }
+    try {
+      const status = await AudioModule.requestRecordingPermissionsAsync();
+      if (!status.granted) { setNotice('未获得麦克风权限，可在系统设置中开启；文字聊天不受影响。'); return; }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      recordStart.current = Date.now();
+      setNotice(null);
+      autoStop.current = setTimeout(() => { void stopAndSend(); }, AUDIO_MAX_SECONDS * 1000);
+    } catch {
+      setNotice('无法开始录音，请重试；文字聊天不受影响。');
+    }
+  };
+
+  const recordingSeconds = Math.min(AUDIO_MAX_SECONDS, Math.floor((recorderState.durationMillis ?? 0) / 1000));
+
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.safe}>
       <View style={styles.header}>
@@ -193,15 +292,41 @@ export default function ChatScreen() {
         {messages.map(message => (
           <View key={message.id} style={[styles.bubbleRow, message.role === 'user' ? styles.userRow : styles.petRow]}>
             <View style={[styles.bubble, message.role === 'user' ? styles.userBubble : styles.petBubble, message.pending && styles.pendingBubble]}>
-              <Text style={styles.bubbleText}>{message.content}</Text>
+              {message.kind === 'audio' ? (
+                <Pressable onPress={() => message.audioUrl && setPlayingUrl(message.audioUrl)} accessibilityRole="button"
+                  accessibilityLabel="播放语音消息">
+                  <Text style={styles.bubbleText}>🎤 语音消息{playingUrl !== null && playingUrl === message.audioUrl ? ' · 播放中' : ''}</Text>
+                  <Text style={styles.audioHint}>{message.audioUrl ? '点击播放' : '音频暂不可用（弱网缓存）'}</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.bubbleText}>{message.content}</Text>
+              )}
+              {message.role === 'pet' && message.taskId ? (
+                <Text style={styles.emotionChip}>
+                  {message.emotionLabel
+                    ? `${emotionLabel(message.emotionLabel)} · ${confidenceText(message.emotionLabel, message.emotionConfidence)}`
+                    : '未识别'}
+                </Text>
+              ) : null}
               {message.pending ? <Text style={styles.pendingTag}>待同步</Text> : null}
             </View>
           </View>
         ))}
       </ScrollView>
       <Text style={styles.disclaimer}>{DISCLAIMER}</Text>
+      <Text style={styles.disclaimer}>{AUDIO_FOOTER}</Text>
+      {recorderState.isRecording ? (
+        <Text accessibilityLiveRegion="polite" style={styles.recordingBanner}>录音中… 点 ⏹ 停止并解读（最长 {AUDIO_MAX_SECONDS} 秒）</Text>
+      ) : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.inputRow}>
+          <Pressable onPress={() => void toggleRecording()} disabled={recordingBusy} accessibilityRole="button"
+            accessibilityLabel={recorderState.isRecording ? '停止录音并解读' : '开始录音'}
+            style={[styles.mic, recordingBusy && styles.sendDisabled, recorderState.isRecording && styles.micActive]}>
+            {recordingBusy ? <ActivityIndicator color={colors.text} /> : (
+              <Text style={styles.micText}>{recorderState.isRecording ? `⏹ ${recordingSeconds}s` : '🎤'}</Text>
+            )}
+          </Pressable>
           <TextInput
             style={styles.input}
             value={input}
@@ -236,6 +361,7 @@ const styles = StyleSheet.create({
   guidanceButton: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 12, backgroundColor: '#C0392B', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden' },
   notice: { paddingHorizontal: 20, paddingTop: 8, fontSize: 13, lineHeight: 20, color: colors.secondary },
   pendingBanner: { paddingHorizontal: 20, paddingTop: 6, fontSize: 12, fontWeight: '600', color: '#C77E1F' },
+  recordingBanner: { paddingHorizontal: 20, paddingTop: 6, fontSize: 12, fontWeight: '600', color: '#C0392B' },
   list: { flex: 1, marginTop: 8 },
   listContent: { paddingHorizontal: 20, paddingBottom: 12, gap: 10 },
   loadMore: { minHeight: 40, justifyContent: 'center', alignItems: 'center' },
@@ -249,9 +375,14 @@ const styles = StyleSheet.create({
   petBubble: { backgroundColor: colors.surface },
   pendingBubble: { opacity: 0.65 },
   bubbleText: { fontSize: 15, lineHeight: 22, color: colors.text },
+  audioHint: { fontSize: 11, color: colors.secondary },
+  emotionChip: { fontSize: 12, fontWeight: '600', color: '#7A5CC7' },
   pendingTag: { fontSize: 11, color: '#C77E1F', fontWeight: '600' },
-  disclaimer: { paddingHorizontal: 20, paddingVertical: 6, fontSize: 11, lineHeight: 16, color: colors.secondary },
+  disclaimer: { paddingHorizontal: 20, paddingVertical: 3, fontSize: 11, lineHeight: 16, color: colors.secondary },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 20, paddingBottom: 10 },
+  mic: { minHeight: 44, minWidth: 52, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderRadius: 16, backgroundColor: colors.surface },
+  micActive: { backgroundColor: '#FDECEA' },
+  micText: { fontSize: 15, fontWeight: '700', color: colors.text },
   input: { flex: 1, minHeight: 44, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: colors.surface, fontSize: 15, color: colors.text },
   send: { minHeight: 44, minWidth: 64, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, borderRadius: 16, backgroundColor: colors.brand },
   sendDisabled: { opacity: 0.5 },

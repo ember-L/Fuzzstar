@@ -10,6 +10,7 @@ export interface ChatMessage {
   role: 'user' | 'pet';
   kind: 'text' | 'audio';
   content: string | null;
+  audio_url: string | null;
   emotion_label: string | null;
   emotion_confidence: number | null;
   task_id: string | null;
@@ -46,7 +47,9 @@ function timestamp(iso: string): number {
 
 export function toCachedMessage(message: ChatMessage, pending = false): CachedMessage {
   return { id: String(message.id), role: message.role, kind: message.kind,
-           content: message.content ?? '', createdAt: timestamp(message.created_at), pending };
+           content: message.content ?? '', audioUrl: message.audio_url ?? null,
+           emotionLabel: message.emotion_label, emotionConfidence: message.emotion_confidence,
+           taskId: message.task_id, createdAt: timestamp(message.created_at), pending };
 }
 
 export function localPendingId(idempotencyKey: string): string {

@@ -27,7 +27,13 @@
           "microphonePermission": false
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "允许绒星使用麦克风，录制猫咪的叫声用于情绪解读。"
+        }
+      ]
     ]
   }
 }

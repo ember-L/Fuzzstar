@@ -2,7 +2,7 @@ import type { createSessionClient } from './session';
 
 type Ticket = { media_id: string; upload: { url: string; fields: Record<string, string> } };
 type SendUpload = (url: string, init: RequestInit) => Promise<{ ok: boolean }>;
-export type MediaKind = 'photo' | 'video';
+export type MediaKind = 'photo' | 'video' | 'audio';
 
 export class MediaUploadError extends Error {}
 export { MediaUploadError as PhotoUploadError };
@@ -10,12 +10,13 @@ export { MediaUploadError as PhotoUploadError };
 const LIMITS: Record<MediaKind, { types: string[]; max: number; message: string }> = {
   photo: { types: ['image/jpeg', 'image/png', 'image/heic'], max: 10 * 1024 * 1024, message: '请选择 10 MiB 以内的 JPG、PNG 或 HEIC 照片。' },
   video: { types: ['video/mp4', 'video/quicktime'], max: 50 * 1024 * 1024, message: '请选择 50 MiB 以内的 MP4 或 MOV 视频。' },
+  audio: { types: ['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/mpeg', 'audio/wav', 'audio/webm'], max: 10 * 1024 * 1024, message: '请录制 10 MiB 以内的音频。' },
 };
 
 export async function uploadMedia(petId: number, file: Blob, kind: MediaKind, authorized: ReturnType<typeof createSessionClient>['authorized'],
                                   sendUpload: SendUpload, signal: AbortSignal) {
   const limit = LIMITS[kind];
-  const label = kind === 'video' ? '视频' : '照片';
+  const label = kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '照片';
   if (!limit.types.includes(file.type) || file.size <= 0 || file.size > limit.max) {
     throw new MediaUploadError(limit.message);
   }
