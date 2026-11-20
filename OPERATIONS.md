@@ -101,7 +101,9 @@ mysql -h HOST -u USER -p DB_restore < backup.sql
 
 | 层 | 命令 | 结果 |
 | --- | --- | --- |
-| 后端单测+集成 | `python -m unittest discover -s tests` | **407 OK**（skipped=3 opt-in） |
+| 后端单测+集成 | `python -m unittest discover -s tests` | **417 OK**（skipped=3 opt-in） |
+| 文案审计（T19） | `python -m unittest discover -s tests -p test_copy_audit.py` | **9 OK**：FRD 一字不差文案＋移动端产品文案回归锁 |
+| worker 并发上限（FRD 内测门槛） | test_worker.WorkerSettingsTests | max_jobs=2（FRD.md:357，100 宠并发不雪崩） |
 | 照片存储真实 S3 | `MEDIA_S3_SMOKE=1 ... test_media_storage.py` | 1 OK（MinIO 版本化桶） |
 | worker Redis 集成 | `REDIS_TEST_URL=... test_worker.py` | 12 OK |
 | 全链路冒烟 T05–T17 | `E2E_SMOKE=1 ... test_e2e_smoke.py` | 1 OK（含配额/隐私/GIF/注销清除段） |

@@ -153,5 +153,6 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     max_tries = 1  # the retry budget lives in the DB attempts column
+    max_jobs = 2  # FRD 内测门槛：100 宠并发不雪崩，worker 并发限 2（FRD.md:357）
     keep_result = 3600
     redis_settings = RedisSettings.from_dsn(os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379'))

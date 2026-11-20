@@ -250,5 +250,13 @@ class RedisIntegrationTests(unittest.TestCase):
             self.assertTrue(task.result['usable'])
 
 
+class WorkerSettingsTests(unittest.TestCase):
+    def test_concurrency_capped_at_two(self):
+        # FRD 内测门槛：100 只宠物并发不雪崩，worker 并发限 2（FRD.md:357）。
+        from app.worker import WorkerSettings
+        self.assertEqual(WorkerSettings.max_jobs, 2)
+        self.assertEqual(WorkerSettings.max_tries, 1)
+
+
 if __name__ == '__main__':
     unittest.main()
