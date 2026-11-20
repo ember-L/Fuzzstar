@@ -1,8 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../components/Screen';
+import { Button } from '../../components/ui/Button';
+import { EntryRow } from '../../components/ui/EntryRow';
 import { api } from '../../lib/api';
 import { cancelPetRechecks } from '../../lib/notifications';
 import { MediaUploadError, uploadMedia } from '../../lib/photo-upload';
@@ -21,6 +23,8 @@ export default function ScreeningScreen() {
   const { petId } = useLocalSearchParams<{ petId: string }>();
   const router = useRouter();
   const id = Number(petId);
+  const [stage, setStage] = useState<'intro' | 'form'>('intro');
+  const [petName, setPetName] = useState('猫咪');
   const [config, setConfig] = useState<SymptomsConfig | null>(null);
   const [form, setForm] = useState<ScreeningForm>(emptyForm);
   const [pending, setPending] = useState<PendingMedia[]>([]);
@@ -33,6 +37,9 @@ export default function ScreeningScreen() {
     api.authorized<SymptomsConfig>('/config/symptoms').then(next => { setConfig(next); setLoadFailed(false); }).catch(() => setLoadFailed(true));
   }, []);
   useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => {
+    api.authorized<{ name: string }>(`/pets/${id}`).then(pet => setPetName(pet.name)).catch(() => {});
+  }, [id]);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   const fieldLabel = (field: string) => {
@@ -109,14 +116,64 @@ export default function ScreeningScreen() {
     }
   };
 
+  const header = (
+    <View style={styles.header}>
+      <Pressable accessibilityRole="button" accessibilityLabel="返回" onPress={() => router.back()} style={styles.back}>
+        <Text style={styles.backText}>‹</Text>
+      </Pressable>
+      <Text accessibilityRole="header" style={styles.headerTitle}>健康初筛</Text>
+      <View style={styles.backSpacer} />
+    </View>
+  );
+
+  // 入口确认屏（Figma 23:394）：对象确认＋初筛说明＋紧急提示。
+  if (stage === 'intro') {
+    return (
+      <Screen>
+        {header}
+        <View style={styles.subjectCard}>
+          <Image source={require('../../../assets/figma/cat-avatar.png')} style={styles.subjectAvatar} />
+          <View style={styles.subjectTexts}>
+            <Text style={styles.subjectLabel}>本次初筛对象</Text>
+            <Text style={styles.subjectName}>{petName}</Text>
+          </View>
+          <View style={styles.subjectTag}><Text style={styles.subjectTagText}>当前猫咪</Text></View>
+        </View>
+        <Text style={styles.introTitle}>{`花 1 分钟，看看${petName}的状态`}</Text>
+        <Text style={styles.introBody}>{'回答几个简短问题，记录精神、食欲和身体信号。\n这不是诊断，而是一份可随时给兽医看的记录。'}</Text>
+        <View style={styles.stepsCard}>
+          {[
+            { num: '01', title: '精神状态', desc: '是否活跃、躲藏或反应变慢' },
+            { num: '02', title: '食欲变化', desc: '吃多吃少，或者完全不吃' },
+            { num: '03', title: '身体症状', desc: '呕吐、排泄、饮水、呼吸等异常' },
+          ].map(step => (
+            <View key={step.num} style={styles.step}>
+              <Text style={styles.stepNum}>{step.num}</Text>
+              <View style={styles.stepTexts}>
+                <Text style={styles.stepTitle}>{step.title}</Text>
+                <Text style={styles.stepDesc}>{step.desc}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+        <Text style={styles.durationNote}>◷  约 1 分钟 · 每天可做一次</Text>
+        <Button title="开始健康初筛" onPress={() => setStage('form')} />
+        <EntryRow icon="alert" iconColor={colors.danger} backgroundColor={colors.dangerBg}
+          title="出现紧急症状？" subtitle="立即查看需要及时就医的信号"
+          onPress={() => setStage('form')} style={styles.emergencyRow} />
+        <Text style={styles.introDisclaimer}>初筛结果仅供日常健康管理参考，不替代专业兽医诊断。</Text>
+      </Screen>
+    );
+  }
+
   if (!config) {
     return (
       <Screen>
-        <Text accessibilityRole="header" style={styles.title}>健康初筛</Text>
+        {header}
         {loadFailed ? (
           <View style={styles.card}>
             <Text style={styles.body}>问卷配置加载失败。</Text>
-            <Pressable accessibilityRole="button" style={styles.primary} onPress={loadConfig}><Text style={styles.primaryText}>重试</Text></Pressable>
+            <Button title="重试" onPress={loadConfig} />
           </View>
         ) : <ActivityIndicator color={colors.brand} />}
       </Screen>
@@ -125,7 +182,7 @@ export default function ScreeningScreen() {
 
   return (
     <Screen>
-      <Text accessibilityRole="header" style={styles.title}>健康初筛</Text>
+      {header}
       <Text style={styles.subtitle}>必填项完成后即可提交；存证照片／视频可选。</Text>
 
       <View style={styles.card}>
@@ -192,7 +249,7 @@ export default function ScreeningScreen() {
                 </View>
               ) : null}
               <TextInput style={styles.notes} value={answer.notes} maxLength={config.notes_max} multiline
-                placeholder={`补充说明（可选，${config.notes_max} 字以内）`} placeholderTextColor={colors.secondary}
+                placeholder={`补充说明（可选，${config.notes_max} 字以内）`} placeholderTextColor={colors.disabledText}
                 onChangeText={text => patchSymptom(spec.code, { notes: text })} />
             </View>
           );
@@ -225,8 +282,8 @@ export default function ScreeningScreen() {
         <Text style={styles.section}>存证（可选）</Text>
         <Text style={styles.subtitle}>照片最多 3 张（≤10 MiB），视频最多 1 段（≤30 秒、≤50 MiB）。</Text>
         <View style={styles.row}>
-          <Pressable accessibilityRole="button" style={styles.secondary} onPress={() => void pickMedia('photo')}><Text style={styles.secondaryText}>添加照片</Text></Pressable>
-          <Pressable accessibilityRole="button" style={styles.secondary} onPress={() => void pickMedia('video')}><Text style={styles.secondaryText}>添加视频</Text></Pressable>
+          <Button title="添加照片" variant="secondary" onPress={() => void pickMedia('photo')} style={styles.half} />
+          <Button title="添加视频" variant="secondary" onPress={() => void pickMedia('video')} style={styles.half} />
         </View>
         {pending.map(item => (
           <View key={item.key} style={styles.switchRow}>
@@ -239,36 +296,52 @@ export default function ScreeningScreen() {
       </View>
 
       {problem ? <Text accessibilityLiveRegion="polite" style={styles.problem}>{problem}</Text> : null}
-      <Pressable accessibilityRole="button" style={[styles.primary, busy && styles.disabled]} disabled={busy} onPress={() => void submit()}>
-        {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.primaryText}>提交初筛</Text>}
-      </Pressable>
-      <Pressable accessibilityRole="button" style={styles.secondary} onPress={() => router.back()}><Text style={styles.secondaryText}>返回</Text></Pressable>
+      <Button title="提交初筛" busy={busy} onPress={() => void submit()} />
+      <Button title="返回" variant="secondary" onPress={() => router.back()} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 24, fontWeight: '700', color: colors.onBrand },
-  subtitle: { fontSize: 13, lineHeight: 20, color: colors.secondary, marginTop: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  back: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
+  backText: { fontSize: 26, lineHeight: 30, color: colors.text, marginTop: -2 },
+  backSpacer: { width: 38 },
+  headerTitle: { fontSize: 19, fontWeight: '600', color: colors.text },
+  subjectCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surfaceRaised, borderRadius: 16, padding: 12, minHeight: 88 },
+  subjectAvatar: { width: 64, height: 64, borderRadius: 32 },
+  subjectTexts: { flex: 1, gap: 2 },
+  subjectLabel: { fontSize: 12, color: colors.secondary },
+  subjectName: { fontSize: 19, fontWeight: '600', color: colors.text },
+  subjectTag: { height: 25, borderRadius: 13, backgroundColor: colors.brandSoft, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
+  subjectTagText: { fontSize: 11, fontWeight: '500', color: colors.accent },
+  introTitle: { fontSize: 21, lineHeight: 29, fontWeight: '600', color: colors.text, marginTop: 8 },
+  introBody: { fontSize: 13, lineHeight: 18, color: colors.secondary },
+  stepsCard: { backgroundColor: colors.surfaceRaised, borderRadius: 16, padding: 16, gap: 18 },
+  step: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
+  stepNum: { fontSize: 16, fontWeight: '600', color: colors.accent, width: 24 },
+  stepTexts: { flex: 1, gap: 3 },
+  stepTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
+  stepDesc: { fontSize: 12, color: colors.secondary },
+  durationNote: { fontSize: 12, color: colors.secondary },
+  emergencyRow: { minHeight: 72 },
+  introDisclaimer: { fontSize: 11, lineHeight: 15, color: colors.secondary, textAlign: 'center' },
+  subtitle: { fontSize: 13, lineHeight: 20, color: colors.secondary },
   body: { fontSize: 14, lineHeight: 20, color: colors.text, flexShrink: 1 },
-  card: { padding: 16, borderRadius: 18, backgroundColor: colors.surface, gap: 10 },
-  section: { fontSize: 15, fontWeight: '700', color: colors.text },
+  card: { padding: 16, borderRadius: 20, backgroundColor: colors.surfaceRaised, gap: 10 },
+  section: { fontSize: 15, fontWeight: '600', color: colors.text },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  chipActive: { backgroundColor: colors.soft, borderColor: colors.brand },
-  chipDanger: { backgroundColor: '#FDECEC', borderColor: '#B3261E' },
+  chip: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  chipActive: { backgroundColor: colors.brandSoft, borderColor: colors.brand },
+  chipDanger: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
   chipText: { fontSize: 13, color: colors.text },
   followup: { marginTop: 6, padding: 12, borderRadius: 12, backgroundColor: colors.background, gap: 8 },
   followupTitle: { fontSize: 13, fontWeight: '600', color: colors.text },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  notes: { minHeight: 60, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 10, fontSize: 13, color: colors.text, textAlignVertical: 'top' },
+  notes: { minHeight: 60, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 10, fontSize: 13, color: colors.text, textAlignVertical: 'top' },
   redline: { gap: 6 },
   row: { flexDirection: 'row', gap: 10 },
-  primary: { minHeight: 48, borderRadius: 14, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: colors.onBrand, fontWeight: '700', fontSize: 15 },
-  secondary: { minHeight: 44, borderRadius: 12, backgroundColor: colors.soft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
-  secondaryText: { color: colors.text, fontWeight: '600', fontSize: 14 },
-  disabled: { opacity: 0.6 },
-  problem: { fontSize: 13, lineHeight: 20, color: '#B3261E' },
-  remove: { fontSize: 13, color: '#B3261E', textDecorationLine: 'underline' },
+  half: { flex: 1 },
+  problem: { fontSize: 13, lineHeight: 20, color: colors.danger },
+  remove: { fontSize: 13, color: colors.danger, textDecorationLine: 'underline' },
 });

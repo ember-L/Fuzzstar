@@ -1,9 +1,10 @@
 // 聊聊页（T15/T16，FRD F09-1/2/3/4/5/6/7）：每宠一线程、同步人设回复、红线就医卡、
 // 录音解读（1–60s→audio_interpret 45s 轮询→情绪+置信度气泡）、常驻免责、
 // chat_cache 弱网镜像、文字失败入 retry_queue 自动补发（幂等键防重；音频不入队）。
+// UI 按 Figma 23:395：猫（AI）消息左侧带头像，用户消息右侧暖橙气泡，输入区胶囊＋圆形发送。
 import { Link, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
+import { ActivityIndicator, AppState, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import { api } from '../../lib/api';
@@ -256,28 +257,51 @@ export default function ChatScreen() {
   };
 
   const recordingSeconds = Math.min(AUDIO_MAX_SECONDS, Math.floor((recorderState.durationMillis ?? 0) / 1000));
+  const cyclePet = () => {
+    if (pets.length < 2 || !selected) return;
+    const index = pets.findIndex(pet => pet.id === selected.id);
+    setSelectedId(pets[(index + 1) % pets.length].id);
+  };
+  const sendDisabled = busy || !input.trim() || !canUse(quota, 'chat_msg');
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.safe}>
+      {/* 会话头部：头像＋名字＋数字分身说明（画板 23:395） */}
       <View style={styles.header}>
-        <Text accessibilityRole="header" style={styles.title}>聊聊</Text>
-        {pets.length > 0 ? (
-          <View style={styles.selector}>
-            {pets.map(pet => (
-              <Pressable key={pet.id} accessibilityRole="button" accessibilityState={{ selected: selected?.id === pet.id }}
-                onPress={() => setSelectedId(pet.id)} style={[styles.pet, selected?.id === pet.id && styles.activePet]}>
-                <Text style={styles.petText}>{selected?.id === pet.id ? '✓ ' : ''}{pet.name}</Text>
-              </Pressable>
-            ))}
-          </View>
+        <Image source={require('../../../assets/figma/cat-avatar.png')} style={styles.headerAvatar} />
+        <View style={styles.headerTexts}>
+          <Text accessibilityRole="header" style={styles.title}>{selected ? selected.name : '聊聊'}</Text>
+          <Text style={styles.headerNote}>数字分身 · 会记住你的记录</Text>
+        </View>
+        {pets.length > 1 ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="切换猫咪" onPress={cyclePet} style={styles.more}>
+            <Text style={styles.moreText}>···</Text>
+          </Pressable>
         ) : null}
+      </View>
+      {pets.length > 1 ? (
+        <View style={styles.selector}>
+          {pets.map(pet => (
+            <Pressable key={pet.id} accessibilityRole="button" accessibilityState={{ selected: selected?.id === pet.id }}
+              onPress={() => setSelectedId(pet.id)} style={[styles.pet, selected?.id === pet.id && styles.activePet]}>
+              <Text style={styles.petText}>{pet.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {/* 常驻免责（AI 提示卡） */}
+      <View style={styles.aiNotice}>
+        <Text style={styles.aiNoticeText}>{`ⓘ  ${DISCLAIMER}`}</Text>
       </View>
       {guidance && selected ? (
         <View style={styles.guidance} accessibilityLiveRegion="assertive">
           <Text style={styles.guidanceTitle}>{guidance.title}</Text>
           <Text style={styles.guidanceText}>{guidance.text}</Text>
           {guidance.route === 'screening' ? (
-            <Link href={`/screening/${selected.id}`} style={styles.guidanceButton} accessibilityRole="button">去做初筛</Link>
+            <Link href={`/screening/${selected.id}`} style={styles.guidanceEntry} accessibilityRole="button">
+              <Text style={styles.guidanceEntryText}>＋  开始健康初筛</Text>
+              <Text style={styles.guidanceChevron}>›</Text>
+            </Link>
           ) : null}
         </View>
       ) : null}
@@ -294,40 +318,49 @@ export default function ChatScreen() {
         ) : null}
         {messages.map(message => (
           <View key={message.id} style={[styles.bubbleRow, message.role === 'user' ? styles.userRow : styles.petRow]}>
-            <View style={[styles.bubble, message.role === 'user' ? styles.userBubble : styles.petBubble, message.pending && styles.pendingBubble]}>
-              {message.kind === 'audio' ? (
-                <Pressable onPress={() => message.audioUrl && setPlayingUrl(message.audioUrl)} accessibilityRole="button"
-                  accessibilityLabel="播放语音消息">
-                  <Text style={styles.bubbleText}>🎤 语音消息{playingUrl !== null && playingUrl === message.audioUrl ? ' · 播放中' : ''}</Text>
-                  <Text style={styles.audioHint}>{message.audioUrl ? '点击播放' : '音频暂不可用（弱网缓存）'}</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.bubbleText}>{message.content}</Text>
-              )}
-              {message.role === 'pet' && message.taskId ? (
-                <Text style={styles.emotionChip}>
-                  {message.emotionLabel
-                    ? `${emotionLabel(message.emotionLabel)} · ${confidenceText(message.emotionLabel, message.emotionConfidence)}`
-                    : '未识别'}
-                </Text>
-              ) : null}
-              {message.pending ? <Text style={styles.pendingTag}>待同步</Text> : null}
+            {message.role === 'pet' ? (
+              <Image source={require('../../../assets/figma/cat-avatar.png')} style={styles.messageAvatar} />
+            ) : null}
+            <View style={styles.bubbleColumn}>
+              <View style={[styles.bubble, message.role === 'user' ? styles.userBubble : styles.petBubble, message.pending && styles.pendingBubble]}>
+                {message.kind === 'audio' ? (
+                  <Pressable onPress={() => message.audioUrl && setPlayingUrl(message.audioUrl)} accessibilityRole="button"
+                    accessibilityLabel="播放语音消息">
+                    <Text style={[styles.bubbleText, message.role === 'user' && styles.userBubbleText]}>🎤 语音消息{playingUrl !== null && playingUrl === message.audioUrl ? ' · 播放中' : ''}</Text>
+                    <Text style={[styles.audioHint, message.role === 'user' && { color: colors.onBrand }]}>{message.audioUrl ? '点击播放' : '音频暂不可用（弱网缓存）'}</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={[styles.bubbleText, message.role === 'user' && styles.userBubbleText]}>{message.content}</Text>
+                )}
+                {message.role === 'pet' && message.taskId ? (
+                  <View style={styles.emotionChip}>
+                    <Text style={styles.emotionChipText}>
+                      {message.emotionLabel
+                        ? `${emotionLabel(message.emotionLabel)} · ${confidenceText(message.emotionLabel, message.emotionConfidence)}`
+                        : '未识别'}
+                    </Text>
+                  </View>
+                ) : null}
+                {message.pending ? <Text style={styles.pendingTag}>待同步</Text> : null}
+              </View>
+              <Text style={[styles.timestamp, message.role === 'user' ? styles.timestampUser : null]}>
+                {new Date(message.createdAt).toTimeString().slice(0, 5)}
+              </Text>
             </View>
           </View>
         ))}
       </ScrollView>
-      <Text style={styles.disclaimer}>{DISCLAIMER}</Text>
-      <Text style={styles.disclaimer}>{AUDIO_FOOTER}</Text>
+      <Text style={styles.audioFooter}>{AUDIO_FOOTER}</Text>
       {recorderState.isRecording ? (
         <Text accessibilityLiveRegion="polite" style={styles.recordingBanner}>录音中… 点 ⏹ 停止并解读（最长 {AUDIO_MAX_SECONDS} 秒）</Text>
       ) : null}
       {!canUse(quota, 'chat_msg') ? <Text style={styles.notice}>{QUOTA_EXHAUSTED_HINT}（录音解读不占聊天配额。）</Text> : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.inputRow}>
+        <View style={styles.inputBar}>
           <Pressable onPress={() => void toggleRecording()} disabled={recordingBusy} accessibilityRole="button"
             accessibilityLabel={recorderState.isRecording ? '停止录音并解读' : '开始录音'}
-            style={[styles.mic, recordingBusy && styles.sendDisabled, recorderState.isRecording && styles.micActive]}>
-            {recordingBusy ? <ActivityIndicator color={colors.text} /> : (
+            style={[styles.mic, recorderState.isRecording && styles.micActive]}>
+            {recordingBusy ? <ActivityIndicator color={colors.accent} /> : (
               <Text style={styles.micText}>{recorderState.isRecording ? `⏹ ${recordingSeconds}s` : '🎤'}</Text>
             )}
           </Pressable>
@@ -335,16 +368,16 @@ export default function ChatScreen() {
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="说点什么…"
-            placeholderTextColor={colors.secondary}
+            placeholder={selected ? `和${selected.name}说点什么…` : '说点什么…'}
+            placeholderTextColor={colors.disabledText}
             multiline
             maxLength={CHAT_INPUT_MAX}
             accessibilityLabel="聊天输入框"
           />
-          <Pressable onPress={() => void submit()} disabled={busy || !input.trim() || !canUse(quota, 'chat_msg')} accessibilityRole="button"
-            accessibilityState={{ disabled: busy || !input.trim() || !canUse(quota, 'chat_msg') }}
-            style={[styles.send, (busy || !input.trim() || !canUse(quota, 'chat_msg')) && styles.sendDisabled]}>
-            {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.sendText}>发送</Text>}
+          <Pressable onPress={() => void submit()} disabled={sendDisabled} accessibilityRole="button"
+            accessibilityLabel="发送" accessibilityState={{ disabled: sendDisabled }}
+            style={[styles.send, sendDisabled && styles.sendDisabled]}>
+            {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.sendText}>↑</Text>}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -354,42 +387,57 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 12, gap: 10 },
-  title: { fontSize: 24, fontWeight: '700', color: colors.onBrand },
-  selector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pet: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.surface },
-  activePet: { backgroundColor: colors.soft },
-  petText: { fontSize: 14, fontWeight: '600', color: colors.text },
-  guidance: { marginHorizontal: 20, marginTop: 10, padding: 14, borderRadius: 16, backgroundColor: '#FDECEA', borderWidth: 1, borderColor: '#C0392B', gap: 6 },
-  guidanceTitle: { fontSize: 16, fontWeight: '700', color: '#C0392B' },
-  guidanceText: { fontSize: 13, lineHeight: 20, color: colors.text },
-  guidanceButton: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 12, backgroundColor: '#C0392B', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden' },
-  notice: { paddingHorizontal: 20, paddingTop: 8, fontSize: 13, lineHeight: 20, color: colors.secondary },
-  pendingBanner: { paddingHorizontal: 20, paddingTop: 6, fontSize: 12, fontWeight: '600', color: '#C77E1F' },
-  recordingBanner: { paddingHorizontal: 20, paddingTop: 6, fontSize: 12, fontWeight: '600', color: '#C0392B' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 8 },
+  headerAvatar: { width: 42, height: 42, borderRadius: 21 },
+  headerTexts: { flex: 1, gap: 1 },
+  title: { fontSize: 17, fontWeight: '600', color: colors.text },
+  headerNote: { fontSize: 11, color: colors.secondary },
+  more: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.brandSoft, alignItems: 'center', justifyContent: 'center' },
+  moreText: { fontSize: 19, fontWeight: '600', color: colors.text, marginTop: -6 },
+  selector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingTop: 8 },
+  pet: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.surfaceRaised },
+  activePet: { backgroundColor: colors.brandSoft },
+  petText: { fontSize: 12, fontWeight: '600', color: colors.text },
+  aiNotice: { marginHorizontal: 16, marginTop: 10, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 14, backgroundColor: colors.brandSoft },
+  aiNoticeText: { fontSize: 12, lineHeight: 17, color: colors.secondary },
+  guidance: { marginHorizontal: 16, marginTop: 10, padding: 14, borderRadius: 16, backgroundColor: colors.dangerBg, gap: 6 },
+  guidanceTitle: { fontSize: 15, fontWeight: '600', color: colors.danger },
+  guidanceText: { fontSize: 12, lineHeight: 18, color: colors.text },
+  guidanceEntry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 53, paddingHorizontal: 16, borderRadius: 16, backgroundColor: colors.surfaceRaised, marginTop: 4 },
+  guidanceEntryText: { fontSize: 14, fontWeight: '600', color: colors.accent },
+  guidanceChevron: { fontSize: 21, color: colors.secondary },
+  notice: { paddingHorizontal: 16, paddingTop: 8, fontSize: 13, lineHeight: 20, color: colors.secondary },
+  pendingBanner: { paddingHorizontal: 16, paddingTop: 6, fontSize: 12, fontWeight: '600', color: colors.warning },
+  recordingBanner: { paddingHorizontal: 16, paddingTop: 6, fontSize: 12, fontWeight: '600', color: colors.danger },
   list: { flex: 1, marginTop: 8 },
-  listContent: { paddingHorizontal: 20, paddingBottom: 12, gap: 10 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 12 },
   loadMore: { minHeight: 40, justifyContent: 'center', alignItems: 'center' },
-  loadMoreText: { fontSize: 13, color: colors.text, textDecorationLine: 'underline' },
+  loadMoreText: { fontSize: 13, color: colors.accent, textDecorationLine: 'underline' },
   empty: { fontSize: 14, lineHeight: 22, color: colors.secondary, textAlign: 'center', paddingVertical: 32 },
-  bubbleRow: { flexDirection: 'row' },
+  bubbleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   userRow: { justifyContent: 'flex-end' },
   petRow: { justifyContent: 'flex-start' },
-  bubble: { maxWidth: '78%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, gap: 4 },
-  userBubble: { backgroundColor: colors.soft },
-  petBubble: { backgroundColor: colors.surface },
+  messageAvatar: { width: 32, height: 32, borderRadius: 16, marginTop: 2 },
+  bubbleColumn: { maxWidth: '78%', gap: 3 },
+  bubble: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, gap: 4 },
+  userBubble: { backgroundColor: colors.assistantBubble },
+  petBubble: { backgroundColor: colors.surfaceRaised },
   pendingBubble: { opacity: 0.65 },
-  bubbleText: { fontSize: 15, lineHeight: 22, color: colors.text },
+  bubbleText: { fontSize: 14, lineHeight: 20, color: colors.text },
+  userBubbleText: { fontSize: 13, lineHeight: 18, color: colors.onBrand },
   audioHint: { fontSize: 11, color: colors.secondary },
-  emotionChip: { fontSize: 12, fontWeight: '600', color: '#7A5CC7' },
-  pendingTag: { fontSize: 11, color: '#C77E1F', fontWeight: '600' },
-  disclaimer: { paddingHorizontal: 20, paddingVertical: 3, fontSize: 11, lineHeight: 16, color: colors.secondary },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 20, paddingBottom: 10 },
-  mic: { minHeight: 44, minWidth: 52, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10, borderRadius: 16, backgroundColor: colors.surface },
-  micActive: { backgroundColor: '#FDECEA' },
-  micText: { fontSize: 15, fontWeight: '700', color: colors.text },
-  input: { flex: 1, minHeight: 44, maxHeight: 120, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16, backgroundColor: colors.surface, fontSize: 15, color: colors.text },
-  send: { minHeight: 44, minWidth: 64, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, borderRadius: 16, backgroundColor: colors.brand },
+  emotionChip: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: colors.brandSoft },
+  emotionChipText: { fontSize: 11, fontWeight: '500', color: colors.accent },
+  pendingTag: { fontSize: 11, color: colors.warning, fontWeight: '600' },
+  timestamp: { fontSize: 10, color: colors.timestamp },
+  timestampUser: { color: colors.onBrand, textAlign: 'right' },
+  audioFooter: { paddingHorizontal: 16, paddingVertical: 3, fontSize: 11, lineHeight: 16, color: colors.secondary },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 22, backgroundColor: colors.surfaceRaised },
+  mic: { minHeight: 34, minWidth: 34, justifyContent: 'center', alignItems: 'center', borderRadius: 17 },
+  micActive: { backgroundColor: colors.dangerBg },
+  micText: { fontSize: 16, fontWeight: '600', color: colors.accent },
+  input: { flex: 1, minHeight: 34, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 6, fontSize: 13, color: colors.text },
+  send: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.brand },
   sendDisabled: { opacity: 0.5 },
-  sendText: { fontSize: 15, fontWeight: '700', color: colors.onBrand },
+  sendText: { fontSize: 20, fontWeight: '600', color: colors.onBrand },
 });
