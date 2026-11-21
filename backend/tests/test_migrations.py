@@ -9,12 +9,12 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
 from app.models import MediaUpload, User
-from app.consents import grant_consent, has_required_consents
-from app.identity import create_email_account, login_email, verify_email
-from app.sessions import create_session, rotate_refresh_token
-from app.tasks import claim_task, enqueue_task, finish_task
+from app.services.consents import grant_consent, has_required_consents
+from app.services.identity import create_email_account, login_email, verify_email
+from app.services.sessions import create_session, rotate_refresh_token
+from app.services.tasks import claim_task, enqueue_task, finish_task
 from datetime import datetime
-from app.pets import PetInput, create_pet, list_pets
+from app.services.pets import PetInput, create_pet, list_pets
 
 
 class MigrationTests(unittest.TestCase):

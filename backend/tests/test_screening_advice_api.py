@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_screening_api import ScreeningFixture
-from app.advice import load_advice_templates
-from app.auth import utcnow
+from app.services.advice import load_advice_templates
+from app.core.security import utcnow
 from app.models import AiUsageLog, HealthScreening, Task
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'

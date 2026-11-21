@@ -5,10 +5,10 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
-from app.identity import create_email_account, verify_email
+from app.core.security import utcnow
+from app.services.identity import create_email_account, verify_email
 from app.models import MediaUpload, Task
-from app.tasks import claim_task, finish_task
+from app.services.tasks import claim_task, finish_task
 from test_auth_api import AuthAPIFixture
 
 

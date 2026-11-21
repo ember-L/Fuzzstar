@@ -5,9 +5,9 @@ from unittest import TestCase
 from sqlalchemy.orm import Session
 
 from test_auth_api import AuthAPIFixture
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import WeightRecord
-from app.weights import detect_sudden_change
+from app.services.weights import detect_sudden_change
 
 
 def pt(kg, days_ago=0):
@@ -72,7 +72,7 @@ class WeightFixture(AuthAPIFixture):
             return record.id
 
     def other_headers(self, consent=True):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         with Session(self.engine) as db:
             token = create_email_account(db, 'other@example.com', self.password, self.now)
             verify_email(db, token, self.now)

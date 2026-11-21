@@ -1,6 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useState } from 'react';
+import { Image, Keyboard, Linking, Platform, Pressable, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../../components/Screen';
 import { Button } from '../../components/ui/Button';
 import { Icon, type IconName } from '../../components/ui/Icon';
@@ -10,7 +11,7 @@ import { DELETION_CONFIRM_LABEL, DELETION_NOTICE, TRAINING_NOTICE, entitlementSu
 import { cancelPetFeeding, cancelPetRechecks, getPermissionState, requestPermission, type PermissionState } from '../../lib/notifications';
 import { QUOTA_EXHAUSTED_HINT, quotaEntries, type QuotaSnapshot } from '../../lib/quota';
 import { ApiError } from '../../lib/session';
-import { colors } from '../../theme';
+import { colors, radius, spacing, typography } from '../../theme';
 
 type Profile = { id: number; nickname: string };
 type Policy = { privacy: string; terms: string };
@@ -18,6 +19,7 @@ type Consent = { required: Policy; links: Policy; granted: boolean; training_gra
 type Entitlement = { plan: string; status: string; message: string };
 type Pet = { id: number; name: string; species: 'cat'; breed: string | null; sex: 'male' | 'female' | 'unknown'; birth_date: string | null; neutered: boolean; body_type?: 'slim' | 'standard' | 'chubby' };
 const emptyDraft = { name: '', breed: '', sex: 'unknown' as Pet['sex'], birth_date: '', neutered: false, body_type: 'standard' as NonNullable<Pet['body_type']> };
+const hasFloatingTabBar = Platform.OS === 'ios' && Number.parseInt(Platform.Version, 10) >= 26;
 
 function petMeta(pet: Pet) {
   const parts: string[] = [pet.breed ?? '猫咪'];
@@ -45,11 +47,16 @@ function MenuRow({ icon, title, subtitle, onPress, first }: { icon: IconName; ti
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { bottom } = useSafeAreaInsets();
+  // iOS 悬浮 Tab 覆盖滚动区；在原有页底留白外加上当前 Tab 的安全区。
+  const contentStyle = hasFloatingTabBar ? { paddingBottom: bottom + 32 } : undefined;
   const [profile, setProfile] = useState<Profile>();
   const [consent, setConsent] = useState<Consent>();
   const [pets, setPets] = useState<Pet[]>([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [registering, setRegistering] = useState(false);
+  const passwordField = useRef<TextInputInstance>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [editing, setEditing] = useState<Pet | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -63,12 +70,12 @@ export default function ProfileScreen() {
   const [quota, setQuota] = useState<QuotaSnapshot>();
   const [entitlement, setEntitlement] = useState<Entitlement>();
 
-  function resetProfile() {
+  const resetProfile = useCallback(() => {
     setProfile(undefined); setConsent(undefined); setPets([]);
     setEditing(null); setShowCreate(false); setRemoving(undefined);
     setDraft(emptyDraft); setQuota(undefined); setEntitlement(undefined);
     setTrainingAsk(false); setDeleting(false); setPrivacyOpen(false);
-  }
+  }, []);
 
   const load = useCallback(async () => {
     const me = await api.authorized<Profile>('/me');
@@ -83,13 +90,13 @@ export default function ProfileScreen() {
   useFocusEffect(useCallback(() => {
     let active = true;
     void load().catch(error => {
-      if (active && !(error instanceof ApiError && error.status === 401)) {
-        setNotice(error instanceof Error ? error.message : '暂时无法加载账号');
-      }
+      if (!active) return;
+      if (error instanceof ApiError && error.status === 401) resetProfile();
+      else setNotice(error instanceof Error ? error.message : '暂时无法加载账号');
     }).finally(() => { if (active) setBusy(false); });
     void getPermissionState().then(value => { if (active) setNotifyState(value); }).catch(() => {});
     return () => { active = false; };
-  }, [load]));
+  }, [load, resetProfile]));
 
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -107,6 +114,24 @@ export default function ProfileScreen() {
       setBusy(false);
     }
   }
+
+  const missingCredentials = !email.trim() || !password;
+  const submitCredentials = () => {
+    if (busy || missingCredentials) return;
+    Keyboard.dismiss();
+    void run(async () => {
+      if (registering) {
+        const result = await api.sendVerification('/auth/register', email.trim(), password);
+        setRegistering(false);
+        setNotice(result.message);
+        setPassword('');
+      } else {
+        await api.login(email.trim(), password);
+        setPassword('');
+        await load();
+      }
+    });
+  };
 
   const json = (method: string, body: object): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const beginEdit = (pet: Pet) => {
@@ -165,33 +190,56 @@ export default function ProfileScreen() {
   );
 
   return (
-    <Screen>
-      <Text accessibilityRole="header" style={styles.pageTitle}>我的</Text>
-      {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
-      {busy ? <Text accessibilityLiveRegion="polite" style={styles.busyText}>处理中…</Text> : null}
-
+    <Screen contentStyle={[contentStyle, !profile && styles.authContent]} adjustForKeyboard={!profile}>
       {!profile ? (
-        /* 未登录：邮箱登录/注册/补发验证（账号入口在本 Tab，无独立 /login 路由） */
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>邮箱账号</Text>
-          <TextField accessibilityLabel="邮箱" placeholder="邮箱" autoCapitalize="none" autoCorrect={false}
-            autoComplete="email" keyboardType="email-address" value={email} onChangeText={setEmail} editable={!busy} />
-          <TextField accessibilityLabel="密码" placeholder="密码" secureTextEntry autoCapitalize="none"
-            autoComplete="current-password" value={password} onChangeText={setPassword} editable={!busy} />
-          <Button title="登录" busy={busy} disabled={!email.trim() || !password} onPress={() => void run(async () => {
-            await api.login(email.trim(), password);
-            setPassword('');
-            await load();
-          })} />
-          <Button title="注册并发送验证邮件" variant="secondary" busy={busy} disabled={!email.trim() || !password} onPress={() => void run(async () => {
-            setNotice((await api.sendVerification('/auth/register', email.trim(), password)).message);
-          })} />
-          <Button title="补发验证邮件" variant="secondary" busy={busy} disabled={!email.trim() || !password} onPress={() => void run(async () => {
-            setNotice((await api.sendVerification('/auth/resend-verification', email.trim(), password)).message);
-          })} />
-        </View>
+        <>
+          <View style={styles.authHeader}>
+            <Image source={require('../../../assets/figma/logo.png')} style={styles.authLogo} accessible={false} />
+            <Text style={styles.authBrand}>绒星 · 星光护绒</Text>
+            <Text accessibilityRole="header" style={styles.authTitle}>{registering ? '创建绒星账号' : '登录绒星'}</Text>
+            <Text style={styles.authSubtitle}>{registering ? '验证邮箱后，就可以登录。' : '照顾猫咪的点滴，都在这里。'}</Text>
+          </View>
+          <View style={styles.authCard}>
+            <View style={styles.authField}>
+              <Text style={styles.authLabel}>邮箱</Text>
+              <TextField accessibilityLabel="邮箱" placeholder="请输入邮箱地址" autoCapitalize="none" autoCorrect={false}
+                autoComplete="email" keyboardType="email-address" returnKeyType="next" submitBehavior="submit"
+                onSubmitEditing={() => passwordField.current?.focus()} value={email} onChangeText={setEmail} editable={!busy} style={styles.authInput} />
+            </View>
+            <View style={styles.authField}>
+              <Text style={styles.authLabel}>密码</Text>
+              <TextField ref={passwordField} accessibilityLabel="密码" placeholder="请输入密码" secureTextEntry autoCapitalize="none"
+                autoComplete={registering ? 'new-password' : 'current-password'} returnKeyType="go" onSubmitEditing={submitCredentials}
+                value={password} onChangeText={setPassword} editable={!busy} style={styles.authInput} />
+              {registering ? <Text style={styles.bodyText}>至少 8 位，同时包含字母和数字。</Text> : null}
+            </View>
+            {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
+            <Button title={registering ? '注册并发送验证邮件' : '登录'} busy={busy} disabled={missingCredentials}
+              onPress={submitCredentials} style={styles.authSubmit} />
+            {busy ? <Text accessibilityLiveRegion="polite" style={styles.busyText}>处理中…</Text> : null}
+          </View>
+          <View style={styles.authActions}>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => {
+              setRegistering(!registering); setPassword(''); setNotice('');
+            }} style={({ pressed }) => [styles.authAction, pressed && styles.pressed]}>
+              <Text style={styles.authActionText}>{registering ? '已有账号？返回登录' : '创建账号'}</Text>
+            </Pressable>
+            {!registering ? (
+              <Pressable accessibilityRole="button" disabled={busy} onPress={() => {
+                if (missingCredentials) { setNotice('填写邮箱和密码后，即可补发验证邮件。'); return; }
+                Keyboard.dismiss();
+                void run(async () => setNotice((await api.sendVerification('/auth/resend-verification', email.trim(), password)).message));
+              }} style={({ pressed }) => [styles.authAction, pressed && styles.pressed]}>
+                <Text style={styles.authActionText}>补发验证邮件</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </>
       ) : (
         <>
+          <Text accessibilityRole="header" style={styles.pageTitle}>我的</Text>
+          {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
+          {busy ? <Text accessibilityLiveRegion="polite" style={styles.busyText}>处理中…</Text> : null}
           {/* 用户信息卡 */}
           <View style={styles.userCard}>
             <View style={styles.userAvatar}><Icon name="user" size={20} color={colors.accent} /></View>
@@ -368,6 +416,20 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  authContent: { paddingTop: spacing.s6 },
+  authHeader: { alignItems: 'center', gap: spacing.s2, paddingBottom: spacing.s2 },
+  authLogo: { width: 72, height: 72, marginBottom: spacing.s1 },
+  authBrand: { ...typography.label, color: colors.accent },
+  authTitle: { ...typography.pageTitle, color: colors.onBrand, textAlign: 'center' },
+  authSubtitle: { ...typography.caption, color: colors.secondary, textAlign: 'center' },
+  authCard: { padding: spacing.s5, gap: spacing.s4, backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
+  authField: { gap: spacing.s2 },
+  authLabel: { ...typography.label, color: colors.text },
+  authInput: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, paddingHorizontal: spacing.s4 },
+  authSubmit: { height: 'auto', minHeight: 48, paddingVertical: spacing.s2 },
+  authActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: spacing.s3 },
+  authAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.s2 },
+  authActionText: { ...typography.caption, fontWeight: '600', color: colors.accent },
   pageTitle: { fontSize: 24, lineHeight: 32, fontWeight: '600', color: colors.text },
   notice: { color: colors.text, backgroundColor: colors.brandSoft, borderRadius: 12, padding: 12, fontSize: 13, lineHeight: 20 },
   busyText: { fontSize: 12, color: colors.secondary },

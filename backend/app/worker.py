@@ -14,18 +14,21 @@ from arq.connections import RedisSettings
 from sqlalchemy import create_engine, delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
-from app.audio import interpret_audio
-from app.auth import utcnow
-from app.chat import load_chat_config
-from app.avatars import S3Assets, generate_avatar
-from app.gif import export_gif
-from app.idempotency import IDEMPOTENCY_TTL
+from app.services.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
+from app.services.audio import interpret_audio
+from app.core.env import load_env
+from app.core.security import utcnow
+from app.services.chat import load_chat_config
+from app.services.avatars import S3Assets, generate_avatar
+from app.services.gif import export_gif
+from app.services.idempotency import IDEMPOTENCY_TTL
 from app.models import MediaUpload, QuotaDenial, RequestIdempotency, Task
-from app.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
-from app.privacy import purge_due
-from app.tasks import MAX_ATTEMPTS, claim_task, finish_task
-from app.triage import load_rules
+from app.core.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
+from app.services.privacy import purge_due
+from app.services.tasks import MAX_ATTEMPTS, claim_task, finish_task
+from app.services.triage import load_rules
+
+load_env()
 
 MEDIA_CLEANUP_GRACE = timedelta(hours=1)
 
@@ -123,7 +126,8 @@ def _providers_from_env():
 
 
 async def startup(ctx):
-    ctx['engine'] = create_engine(os.environ['DATABASE_URL'], hide_parameters=True)
+    ctx['engine'] = create_engine(os.environ['DATABASE_URL'], hide_parameters=True,
+                                  pool_pre_ping=True, pool_recycle=1800)
     assets = S3Assets.from_env()
     if assets is None:
         raise RuntimeError('MEDIA_S3_* settings are required for the worker')

@@ -3,7 +3,7 @@ import unittest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.consents import current_consents, grant_consent, has_required_consents
+from app.services.consents import current_consents, grant_consent, has_required_consents
 from app.models import Base, User
 
 

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app import placeholders
+from app.services import placeholders
 
 BODY_TYPES = ('slim', 'standard', 'chubby')
 ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')

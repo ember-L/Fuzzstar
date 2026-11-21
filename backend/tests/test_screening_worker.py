@@ -6,11 +6,11 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.advice import load_advice_templates
+from app.services.advice import load_advice_templates
 from app.models import AiUsageLog, Base, HealthScreening, Pet, ScreeningSymptom, Task, User
 from app.providers.fake import FakeLLMProvider
-from app.tasks import enqueue_task
-from app.triage import load_rules
+from app.services.tasks import enqueue_task
+from app.services.triage import load_rules
 from app import worker
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
@@ -112,7 +112,7 @@ class ScreeningWorkerTests(unittest.TestCase):
 
     def test_fallback_does_not_overwrite_existing_llm_advice(self):
         asyncio.run(worker.run_task(self.ctx, self.task_id))
-        from app.advice import apply_template_fallback
+        from app.services.advice import apply_template_fallback
         apply_template_fallback(self.engine, self.task_id, self.templates)
         self.assertEqual(self.screening().advice_json['source'], 'llm')
 

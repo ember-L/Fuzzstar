@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.models import Base, Pet, User
-from app.pets import PetInput, PetLimitReached, PetNotFound, create_pet, delete_pet, get_pet, list_pets, update_pet
+from app.services.pets import PetInput, PetLimitReached, PetNotFound, create_pet, delete_pet, get_pet, list_pets, update_pet
 
 
 class PetServiceTests(unittest.TestCase):

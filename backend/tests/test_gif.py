@@ -15,8 +15,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app import gif, worker
-from app.auth import utcnow
+from app.services import gif
+from app import worker
+from app.core.security import utcnow
 from app.models import Base, Pet, Task, User
 from test_auth_api import AuthAPIFixture
 from test_avatar_read import ACTIONS, FakeStorage, make_result
@@ -99,7 +100,7 @@ class GifAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.share(headers={}).status_code, 401)
 
     def test_requires_consent(self):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'noconsent-gif@example.com', self.password, self.now)
             verify_email(db, token, self.now)
@@ -150,7 +151,7 @@ class GifAPITests(AuthAPIFixture, unittest.TestCase):
             self.assertEqual(task.payload['clip_version_id'], 'v-idle')
 
     def test_other_users_pet_404(self):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         self.insert_avatar()
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'other-gif@example.com', self.password, self.now)

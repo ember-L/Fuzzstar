@@ -25,16 +25,16 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app import main, worker
-from app.advice import load_advice_templates
-from app.auth import utcnow
-from app.avatars import ACTIONS, S3Assets
-from app.chat import load_chat_config
-from app.identity import create_email_account, verify_email
-from app.media import PhotoStorage
+from app.services.advice import load_advice_templates
+from app.core.security import utcnow
+from app.services.avatars import ACTIONS, S3Assets
+from app.services.chat import load_chat_config
+from app.services.identity import create_email_account, verify_email
+from app.services.media import PhotoStorage
 from app.models import AiUsageLog, Base, DeletionJob, MediaUpload, Pet, Task, User
-from app.privacy import purge_due
+from app.services.privacy import purge_due
 from app.providers.fake import FakeAudioProvider, FakeImageProvider, FakeLLMProvider, FakeVideoProvider
-from app.triage import load_rules
+from app.services.triage import load_rules
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 

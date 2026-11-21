@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from test_auth_api import AuthAPIFixture
 from app import main
-from app.identity import create_email_account, verify_email
-from app.media import PhotoStorage, valid_photo
+from app.services.identity import create_email_account, verify_email
+from app.services.media import PhotoStorage, valid_photo
 from app.models import MediaUpload
 
 # 1×1 PNG; no user media in the test suite.
@@ -109,7 +109,7 @@ class MediaAPITests(AuthAPIFixture, TestCase):
                 Image.new('RGB', (16, 16)).save(image, format_name)
                 self.assertTrue(valid_photo(image.getvalue(), content_type))
                 self.assertFalse(valid_photo(image.getvalue()[:20], content_type))
-                with patch('app.media.MAX_PHOTO_PIXELS', 255):
+                with patch('app.services.media.MAX_PHOTO_PIXELS', 255):
                     self.assertFalse(valid_photo(image.getvalue(), content_type))
 
     def test_another_account_cannot_complete_even_with_the_id(self):

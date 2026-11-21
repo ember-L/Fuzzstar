@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_screening_api import ScreeningFixture, CARD_TITLE, CARD_SUBTITLE, PREPARATION
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import HealthEvent, Pet
 
 OBSERVE_BODY = {'spirit': 'normal', 'appetite': 'normal',

@@ -13,11 +13,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app import main
-from app.identity import create_email_account, verify_email
-from app.mail_worker import deliver_due
+from app.services.identity import create_email_account, verify_email
+from app.services.mail_worker import deliver_due
 from app.models import Base
-from app.sessions import create_session
-from app.tasks import claim_task, enqueue_task, finish_task
+from app.services.sessions import create_session
+from app.services.tasks import claim_task, enqueue_task, finish_task
 
 
 class AuthAPIFixture:
@@ -118,7 +118,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         })
 
     def test_registration_requires_confirmation_before_login(self):
-        with patch.dict(os.environ, self.smtp_settings), patch('app.mail.smtplib.SMTP_SSL') as smtp:
+        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
             response = self.register('New@Example.com')
             self.assertEqual(response.status_code, 202)
             client = smtp.return_value.__enter__.return_value
@@ -145,7 +145,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         email = 'retry@example.com'
         self.assertEqual(self.register(email).status_code, 202)
         self.assertEqual(self.login(email).json()['code'], 'EMAIL_UNVERIFIED')
-        with patch.dict(os.environ, self.smtp_settings), patch('app.mail.smtplib.SMTP_SSL') as smtp:
+        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
             deliver = smtp.return_value.__enter__.return_value.send_message
             deliver.side_effect = SMTPException('internal failure')
             self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=1)), 0)
@@ -160,14 +160,14 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         email = 'resend@example.com'
         self.assertEqual(self.register(email).status_code, 202)
         path = '/api/v1/auth/resend-verification'
-        with patch.dict(os.environ, self.smtp_settings), patch('app.mail.smtplib.SMTP_SSL') as smtp:
+        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
             deliver = smtp.return_value.__enter__.return_value.send_message
             deliver_due(self.engine, self.key, self.now + timedelta(seconds=1))
             old = parse_qs(urlsplit(deliver.call_args.args[0].get_content().splitlines()[2]).fragment)['token'][0]
             data = {'email': email, 'password': self.password}
             self.assertEqual(self.client.post(path, json=data).status_code, 202)
             self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=2)), 0)
-            with patch('app.auth.utcnow', return_value=self.now + timedelta(seconds=65)):
+            with patch('app.routers.auth.utcnow', return_value=self.now + timedelta(seconds=65)):
                 self.assertEqual(self.client.post(path, json={**data, 'password': 'Wrong123'}).status_code, 202)
                 self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=65)), 0)
                 self.assertEqual(self.client.post(path, json=data).status_code, 202)
@@ -177,7 +177,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.client.post('/api/v1/auth/verify-email', json={'token': new}).status_code, 200)
 
     def test_ip_limit_is_persisted_and_returns_retry_after(self):
-        with patch('app.auth.utcnow', return_value=self.now.replace(second=10, microsecond=0)):
+        with patch('app.core.middleware.utcnow', return_value=self.now.replace(second=10, microsecond=0)):
             for _ in range(30):
                 response = self.client.post('/api/v1/auth/login', json={})
                 self.assertEqual(response.status_code, 400)
@@ -185,7 +185,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
             self.assertEqual(response.status_code, 429)
             self.assertEqual(response.json()['code'], 'RATE_LIMITED')
             self.assertEqual(response.headers['retry-after'], '50')
-        with patch('app.auth.utcnow', return_value=self.now.replace(second=10, microsecond=0) + timedelta(minutes=1)):
+        with patch('app.core.middleware.utcnow', return_value=self.now.replace(second=10, microsecond=0) + timedelta(minutes=1)):
             self.assertEqual(self.login().status_code, 200)
 
     def test_invalid_registration_is_rejected_before_mail(self):

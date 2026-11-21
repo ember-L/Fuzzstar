@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.rules import load_action_map
+from app.services.rules import load_action_map
 from test_auth_api import AuthAPIFixture
 
 ACTIONS = {'idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right'}

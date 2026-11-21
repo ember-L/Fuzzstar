@@ -4,7 +4,7 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 
-from app.feeding import (
+from app.services.feeding import (
     FEEDING_DISCLAIMER,
     kcal_estimate,
     life_stage,

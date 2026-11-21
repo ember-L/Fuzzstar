@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import Task
 from test_auth_api import AuthAPIFixture
 
@@ -53,7 +53,7 @@ class AvatarReadTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.read(headers={}).status_code, 401)
 
     def test_requires_consent(self):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'noconsent3@example.com', self.password, self.now)
             verify_email(db, token, self.now)
@@ -115,7 +115,7 @@ class AvatarReadTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(body['status'], 'succeeded')
 
     def test_other_users_pet_404(self):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'other@example.com', self.password, self.now)
             verify_email(db, token, self.now)

@@ -1,9 +1,18 @@
-// Icon geometry exported from Figma (绒星 v2 boards) via figwright get_vector.
+// 绒星 v2 Figma 描边图标与应用内操作图标。
 // Stroke-only paths; color is supplied by the Icon component.
 export interface IconPath { d: string; x: number; y: number; strokeWidth: number; }
 export interface IconDef { viewBox: string; paths: IconPath[]; }
 
 export const icons = {
+  microphone: { viewBox: '0 0 24 24', paths: [
+    { d: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z M5 11v1a7 7 0 0 0 14 0v-1 M12 19v3 m-3 0h6', x: 0, y: 0, strokeWidth: 1.8 },
+  ] },
+  stop: { viewBox: '0 0 24 24', paths: [
+    { d: 'M8 5h8a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z', x: 0, y: 0, strokeWidth: 2.4 },
+  ] },
+  arrowUp: { viewBox: '0 0 24 24', paths: [
+    { d: 'M12 19V5 M6 11l6-6 6 6', x: 0, y: 0, strokeWidth: 2.2 },
+  ] },
   home: { viewBox: '0 0 24 24', paths: [
     { d: 'M 0 7 L 9 0 L 18 7 L 18 16 C 18 16.530432999134064 17.78928592801094 17.039140433073044 17.414213180541992 17.414213180541992 C 17.039140433073044 17.78928592801094 16.530432999134064 18 16 18 L 11 18 L 11 12 L 7 12 L 7 18 L 2 18 C 1.4695670008659363 18 0.960859090089798 17.78928592801094 0.5857863426208496 17.414213180541992 C 0.21071359515190125 17.039140433073044 4.440892098500626e-16 16.530432999134064 0 16 L 0 7 Z', x: 3, y: 3, strokeWidth: 1.8 },
   ] },

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.health import compute_health
+from app.services.health import compute_health
 from app.main import app
 
 NOW = datetime(2026, 11, 19, 12, 0, 0)

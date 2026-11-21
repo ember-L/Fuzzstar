@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.mail import MailConfigurationError, send_verification_email
+from app.services.mail import MailConfigurationError, send_verification_email
 
 
 class MailTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class MailTests(unittest.TestCase):
         config = {'SMTP_HOST': 'smtp.example.com', 'SMTP_PORT': '465',
                   'SMTP_USER': 'account', 'SMTP_PASSWORD': 'secret',
                   'SMTP_FROM': 'service@example.com', 'VERIFICATION_BASE_URL': 'https://example.com/verify'}
-        with patch.dict('os.environ', config, clear=True), patch('app.mail.smtplib.SMTP_SSL') as smtp:
+        with patch.dict('os.environ', config, clear=True), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
             send_verification_email('cat@example.com', 'a_token')
             client = smtp.return_value.__enter__.return_value
             message = client.send_message.call_args.args[0]

@@ -1,10 +1,11 @@
-import { Link, useFocusEffect, useRouter } from 'expo-router';
+import { Link, useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AvatarStage, type Submission } from '../../components/AvatarStage';
 import { GifExport } from '../../components/GifExport';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
+import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/ui/Icon';
 import { SectionHeader } from '../../components/ui/SectionHeader';
 import { api } from '../../lib/api';
@@ -13,7 +14,7 @@ import { tzOffsetMinutes } from '../../lib/diet';
 import { formatDateTime, isUrgent, stateLabel, totalEffective, type HealthSummary } from '../../lib/health';
 import { canUse, type QuotaSnapshot } from '../../lib/quota';
 import { ApiError } from '../../lib/session';
-import { colors } from '../../theme';
+import { colors, radius, spacing, typography } from '../../theme';
 
 // 健康状态→语义色（v2 Foundations：success/warning/danger）
 const STATE_STYLE: Record<string, { bg: string; fg: string }> = {
@@ -21,6 +22,16 @@ const STATE_STYLE: Record<string, { bg: string; fg: string }> = {
   observe: { bg: colors.warningBg, fg: colors.warning },
   vet: { bg: colors.dangerBg, fg: colors.danger },
   urgent: { bg: colors.dangerBg, fg: colors.danger },
+};
+const PROFILE_STATES = {
+  loading: { title: '正在加载猫咪档案', detail: '正在连接绒星服务…', action: '' },
+  signedOut: { title: '欢迎来到绒星', detail: '登录后，就能查看猫咪档案和健康记录。', action: '去登录' },
+  consent: { title: '请先阅读并同意协议', detail: '同意后，即可查看和管理猫咪档案。', action: '查看协议' },
+  ready: { title: '添加第一只猫咪', detail: '为它创建一份档案，从今天开始记录饮食、体重和健康。', action: '前往「我的」创建档案' },
+  error: { title: '暂时无法加载猫咪档案', detail: '请检查网络连接，或稍后再试。', action: '重新加载' },
+  configuration: { title: '还未连接绒星服务', detail: __DEV__
+    ? '请先启动本地 API，再将 Expo 指向该服务并重启。'
+    : '当前版本无法连接服务，请更新到最新版本后再试。', action: '' },
 };
 const STATE_HINTS: Record<string, string> = {
   normal: '状态良好，继续保持。',
@@ -37,53 +48,65 @@ function greeting(): string {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const [pets, setPets] = useState<{ id: number; name: string }[]>([]);
   const [selectedId, setSelectedId] = useState<number>();
-  const [loadError, setLoadError] = useState(false);
+  const [petsState, setPetsState] = useState<keyof typeof PROFILE_STATES>('loading');
+  const [retry, setRetry] = useState(0);
   const [submission, setSubmission] = useState<(Submission & { petId: number }) | undefined>();
-  const [health, setHealth] = useState<HealthSummary | null>(null);
+  const [healthResult, setHealthResult] = useState<{ petId: number; data: HealthSummary | null }>();
   const [showDeductions, setShowDeductions] = useState(false);
   const [emotionEvent, setEmotionEvent] = useState<{ id: string; petId: number; emotion: string } | null>(null);
   const [quota, setQuota] = useState<QuotaSnapshot>();
   // F09-5：聊聊页回复情绪→仅当前选中猫的分身播一次对应动作后回待机。
   useEffect(() => emotionBus.subscribe(event => setEmotionEvent({ id: String(event.id), petId: event.petId, emotion: event.emotion })), []);
   const selected = pets.find(pet => pet.id === selectedId) ?? pets[0];
-  useFocusEffect(useCallback(() => {
+  useEffect(() => {
+    if (!isFocused) return;
     let active = true;
     api.authorized<{ id: number; name: string }[]>('/pets').then(items => {
-      if (active) { setPets(items); setLoadError(false); }
+      if (!Array.isArray(items)) throw new Error('Invalid pet list');
+      if (active) { setPets(items); setPetsState('ready'); }
     }).catch(error => {
       if (active) {
         setPets([]);
-        setLoadError(!(error instanceof ApiError && (error.status === 401 || error.status === 403)));
+        setPetsState(error instanceof ApiError && error.status === 401 ? 'signedOut'
+          : error instanceof ApiError && error.code === 'CONSENT_REQUIRED' ? 'consent'
+          : error instanceof ApiError && error.code === 'API_NOT_CONFIGURED' ? 'configuration' : 'error');
       }
     });
     api.authorized<QuotaSnapshot>('/quota').then(snapshot => { if (active) setQuota(snapshot); }).catch(() => {});
-    return () => { active = false; setPets([]); setLoadError(false); };
-  }, []));
+    return () => { active = false; setPets([]); setPetsState('loading'); setHealthResult(undefined); };
+  }, [isFocused, retry]);
   // 健康聚合随焦点与切猫重拉（AC-02-4 / AC-04-1 刷新一致性）。
   const selectedPetId = selected?.id;
   useFocusEffect(useCallback(() => {
     setShowDeductions(false);
-    if (!selectedPetId) { setHealth(null); return; }
+    if (!selectedPetId) return;
     let active = true;
     api.authorized<HealthSummary>('/pets/' + selectedPetId + '/health?tz_offset_minutes=' + tzOffsetMinutes())
-      .then(data => { if (active) setHealth(data); })
-      .catch(() => { if (active) setHealth(null); });
+      .then(data => { if (active) setHealthResult({ petId: selectedPetId, data }); })
+      .catch(() => { if (active) setHealthResult({ petId: selectedPetId, data: null }); });
     return () => { active = false; };
   }, [selectedPetId]));
+  const currentHealth = healthResult?.petId === selectedPetId ? healthResult : undefined;
+  const health = currentHealth?.data ?? null;
+  const healthFallback = currentHealth ? '暂不可用' : '加载中';
   const urgent = health !== null && isUrgent(health.state);
-  const stateStyle = health ? STATE_STYLE[health.state] ?? { bg: colors.neutralPillBg, fg: colors.disabledText } : { bg: colors.neutralPillBg, fg: colors.disabledText };
-  const hint = health
+  const assessed = health !== null && health.score !== null;
+  const stateStyle = assessed ? STATE_STYLE[health.state] ?? { bg: colors.neutralPillBg, fg: colors.disabledText } : { bg: colors.neutralPillBg, fg: colors.disabledText };
+  const hint = assessed
     ? (urgent && health.urgent_card ? health.urgent_card.subtitle : STATE_HINTS[health.state] ?? '')
-    : (selected ? `还没有为${selected.name}做过初筛，花 1 分钟了解它的状态` : '创建猫咪档案后，可以查看健康状态。');
+    : health ? `还没有为${selected?.name}做过初筛，花 1 分钟了解它的状态`
+      : currentHealth ? '暂时无法取得最新健康状态。' : '正在读取最新健康状态…';
   const cyclePet = () => {
     if (pets.length < 2 || !selected) return;
     const index = pets.findIndex(pet => pet.id === selected.id);
     setSelectedId(pets[(index + 1) % pets.length].id);
   };
+  const profileState = PROFILE_STATES[petsState];
   return (
-    <Screen>
+    <Screen contentStyle={styles.screenContent}>
       {/* 问候＋切换猫咪（画板 22:309 头部） */}
       <View style={styles.header}>
         <View style={styles.headerText}>
@@ -93,7 +116,7 @@ export default function HomeScreen() {
         {selected ? (
           <View style={styles.headerPet}>
             <Image source={require('../../../assets/figma/cat-avatar.png')} style={styles.headerAvatar} accessibilityLabel={`${selected.name}的头像`} />
-            <Pressable accessibilityRole="button" accessibilityLabel="切换猫咪" onPress={cyclePet} style={styles.switchPill}>
+            <Pressable accessibilityRole="button" accessibilityLabel="切换猫咪" accessibilityValue={{ text: selected.name }} hitSlop={{ top: 7, bottom: 7 }} onPress={cyclePet} style={styles.switchPill}>
               <Text style={styles.switchText} numberOfLines={1}>{selected.name} ⌄</Text>
             </Pressable>
           </View>
@@ -109,7 +132,6 @@ export default function HomeScreen() {
           ))}
         </View>
       ) : null}
-      {loadError ? <Text style={styles.note}>猫咪列表加载失败，请稍后重试。</Text> : null}
       {selected ? (
         <>
           {/* 品牌插画位：左文案＋右分身舞台（无分身时静态底图兜底，即画板视觉） */}
@@ -129,9 +151,9 @@ export default function HomeScreen() {
           <View style={[styles.healthCard, urgent && styles.healthCardUrgent]}>
             <Text style={styles.healthLabel}>健康状态</Text>
             <View style={styles.healthRow}>
-              <Text style={[styles.score, urgent && { color: colors.danger }]}>{health && health.score !== null ? String(health.score) : '——'}</Text>
+              <Text style={[styles.score, !assessed && styles.scorePlaceholder, urgent && { color: colors.danger }]}>{assessed ? String(health.score) : '——'}</Text>
               <View style={[styles.statePill, { backgroundColor: stateStyle.bg }]}>
-                <Text style={[styles.statePillText, { color: stateStyle.fg }]}>{health ? stateLabel(health.state) : '未评估'}</Text>
+                <Text style={[styles.statePillText, { color: stateStyle.fg }]}>{assessed ? stateLabel(health.state) : health ? '未评估' : healthFallback}</Text>
               </View>
             </View>
             <Text style={styles.healthHint}>{hint}</Text>
@@ -153,50 +175,65 @@ export default function HomeScreen() {
               </View>
             ) : null}
             {urgent && health?.urgent_card ? (
-              <Link href={`/screening/${selected.id}`} accessibilityRole="button" style={styles.urgentLink}>
-                <Text style={styles.urgentLinkText}>{health.urgent_card.title} ›</Text>
+              <Link href={`/screening/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.urgentLink}>
+                  <Text style={styles.urgentLinkText}>{health.urgent_card.title} ›</Text>
+                </Pressable>
               </Link>
             ) : null}
             {!urgent ? (
-              <Link href={`/screening/${selected.id}`} accessibilityRole="button" style={styles.ctaLink}>
-                <Text style={styles.ctaLinkText}>{health?.latest_screening ? '再做一次初筛' : '开始健康初筛'}</Text>
-              </Link>
+              <Button title={health?.latest_screening ? '再做一次初筛' : '开始健康初筛'}
+                onPress={() => router.push(`/screening/${selected.id}`)} style={styles.cta} />
             ) : null}
           </View>
-          {/* 今日概览 */}
-          <SectionHeader title="今日概览" actionLabel="查看全部  ›" onAction={() => router.push(`/timeline/${selected.id}`)} />
-          <View style={styles.tiles}>
-            <Link href={`/diet/${selected.id}`} accessibilityRole="button" style={styles.tile}>
-              <Icon name="food" size={22} color={colors.mutedIcon} />
-              <Text style={styles.tileLabel}>今日饮食</Text>
-              <Text style={styles.tileValue}>{health?.diet_today && health.diet_today.count > 0 ? `${health.diet_today.total_g}g · ${health.diet_today.total_kcal}kcal` : '暂无记录'}</Text>
-            </Link>
-            <Link href={`/weight/${selected.id}`} accessibilityRole="button" style={styles.tile}>
-              <Icon name="scale" size={22} color={colors.mutedIcon} />
-              <Text style={styles.tileLabel}>最新体重</Text>
-              <Text style={styles.tileValue}>{health?.latest_weight ? `${health.latest_weight.weight_kg} kg` : '暂无记录'}</Text>
-            </Link>
-            <Link href={`/screening/history/${selected.id}`} accessibilityRole="button" style={styles.tile}>
-              <Icon name="file" size={22} color={colors.mutedIcon} />
-              <Text style={styles.tileLabel}>最近初筛</Text>
-              <Text style={styles.tileValue}>{health?.latest_screening ? stateLabel(health.latest_screening.state) : '暂无记录'}</Text>
-            </Link>
+          <View style={styles.section}>
+            <SectionHeader title="今日概览" actionLabel="查看全部  ›" onAction={() => router.push(`/timeline/${selected.id}`)} style={styles.sectionHeader} />
+            <View style={styles.tiles}>
+              <Link href={`/diet/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.tile}>
+                  <Text style={styles.tileLabel}>今日饮食</Text>
+                  <Icon name="food" size={22} color={colors.mutedIcon} />
+                  <Text style={styles.tileValue}>{health?.diet_today && health.diet_today.count > 0 ? `${health.diet_today.total_g}g · ${health.diet_today.total_kcal}kcal` : health ? '暂无记录' : healthFallback}</Text>
+                </Pressable>
+              </Link>
+              <Link href={`/weight/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.tile}>
+                  <Text style={styles.tileLabel}>最新体重</Text>
+                  <Icon name="scale" size={22} color={colors.mutedIcon} />
+                  <Text style={styles.tileValue}>{health?.latest_weight ? `${health.latest_weight.weight_kg} kg` : health ? '暂无记录' : healthFallback}</Text>
+                </Pressable>
+              </Link>
+              <Link href={`/screening/history/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.tile}>
+                  <Text style={styles.tileLabel}>最近初筛</Text>
+                  <Icon name="file" size={22} color={colors.mutedIcon} />
+                  <Text style={styles.tileValue}>{health?.latest_screening ? stateLabel(health.latest_screening.state) : health ? '暂无记录' : healthFallback}</Text>
+                </Pressable>
+              </Link>
+            </View>
           </View>
-          {/* 快捷操作 */}
-          <SectionHeader title="快捷操作" />
-          <View style={styles.tiles}>
-            <Link href={`/diet/${selected.id}`} accessibilityRole="button" style={styles.quick}>
-              <Icon name="food" size={17} color={colors.text} />
-              <Text style={styles.quickLabel}>记录饮食</Text>
-            </Link>
-            <Link href={`/weight/${selected.id}`} accessibilityRole="button" style={styles.quick}>
-              <Icon name="scale" size={17} color={colors.text} />
-              <Text style={styles.quickLabel}>记录体重</Text>
-            </Link>
-            <Link href="/(tabs)/chat" accessibilityRole="button" style={[styles.quick, styles.quickChat]}>
-              <Icon name="chat" size={17} color={colors.accent} />
-              <Text style={[styles.quickLabel, { color: colors.accent }]}>和我聊聊</Text>
-            </Link>
+          <View style={styles.section}>
+            <SectionHeader title="快捷操作" style={styles.sectionHeader} />
+            <View style={styles.tiles}>
+              <Link href={`/diet/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.quick}>
+                  <Icon name="food" size={17} color={colors.text} />
+                  <Text style={styles.quickLabel}>记录饮食</Text>
+                </Pressable>
+              </Link>
+              <Link href={`/weight/${selected.id}`} asChild>
+                <Pressable accessibilityRole="button" style={styles.quick}>
+                  <Icon name="scale" size={17} color={colors.text} />
+                  <Text style={styles.quickLabel}>记录体重</Text>
+                </Pressable>
+              </Link>
+              <Link href="/(tabs)/chat" asChild>
+                <Pressable accessibilityRole="button" style={StyleSheet.flatten([styles.quick, styles.quickChat])}>
+                  <Icon name="chat" size={17} color={colors.accent} />
+                  <Text style={[styles.quickLabel, { color: colors.accent }]}>和我聊聊</Text>
+                </Pressable>
+              </Link>
+            </View>
           </View>
           {/* 分身上传与 GIF 分享（设计稿未覆盖的功能区，沿用既有组件） */}
           <SectionHeader title="分身与分享" />
@@ -206,60 +243,91 @@ export default function HomeScreen() {
           <Link href={`/timeline/${selected.id}`} style={styles.profileLink}>健康时间线（初筛 · 饮食 · 体重）</Link>
         </>
       ) : (
-        <View style={styles.empty}>
-          <Text style={styles.note}>{loadError ? '暂时无法读取猫咪档案。' : '还没有猫咪档案。创建第一只猫咪后，这里会显示它的健康状态。'}</Text>
-          <Link href="/(tabs)/profile" style={styles.profileLink}>前往「我的」创建档案</Link>
-        </View>
+        <>
+          <View style={styles.welcomeHero}>
+            <View style={styles.welcomeCopy}>
+              <Text style={styles.welcomeTitle}>{'用爱守护\n它的每一天'}</Text>
+              <Text style={styles.welcomeSubtitle}>从一份猫咪档案开始</Text>
+            </View>
+            <Image source={require('../../../assets/figma/59f10c90466cfa3aa84c0f88478dccedc8f69565.png')}
+              accessible={false} style={styles.welcomeCat} resizeMode="contain" />
+          </View>
+          <View style={styles.profileState}>
+            <View accessibilityLiveRegion="polite">
+              <Text accessibilityRole="header" style={styles.stateTitle}>{profileState.title}</Text>
+              <Text style={styles.stateDetail}>{profileState.detail}</Text>
+            </View>
+            {profileState.action ? (
+              <Button title={profileState.action} style={styles.cta} onPress={() => {
+                if (petsState === 'error') {
+                  setPetsState('loading');
+                  setRetry(attempt => attempt + 1);
+                } else {
+                  router.navigate('/(tabs)/profile');
+                }
+              }} />
+            ) : null}
+          </View>
+        </>
       )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  headerText: { flex: 1, gap: 2 },
+  screenContent: { paddingTop: 0 },
+  header: { marginLeft: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  headerText: { flex: 1 },
   greeting: { fontSize: 25, lineHeight: 35, fontWeight: '600', color: colors.onBrand },
-  subtitle: { fontSize: 13, color: colors.secondary },
-  headerPet: { alignItems: 'center', gap: 4 },
+  subtitle: { fontSize: 13, lineHeight: 18, color: colors.secondary },
+  headerPet: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 4 },
   headerAvatar: { width: 40, height: 40, borderRadius: 20 },
-  switchPill: { height: 31, borderRadius: 16, backgroundColor: colors.brandSoft, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', maxWidth: 96 },
-  switchText: { fontSize: 12, fontWeight: '500', color: colors.text },
+  switchPill: { minHeight: 31, borderRadius: 16, backgroundColor: colors.brandSoft, paddingHorizontal: 7, alignItems: 'center', justifyContent: 'center', maxWidth: 96 },
+  switchText: { fontSize: 12, lineHeight: 17, fontWeight: '500', color: colors.text },
   selector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pet: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.surfaceRaised },
   activePet: { backgroundColor: colors.brandSoft },
   petText: { color: colors.text, fontWeight: '600', fontSize: 13 },
-  hero: { flexDirection: 'row', backgroundColor: colors.heroBg, borderRadius: 22, padding: 16, minHeight: 195, overflow: 'hidden' },
-  sparkle: { position: 'absolute', top: 28, right: 14, fontSize: 17, color: colors.sparkle, zIndex: 1 },
-  heroText: { flex: 1, justifyContent: 'center', gap: 10, paddingVertical: 8 },
+  hero: { flexDirection: 'row', backgroundColor: colors.heroBg, borderRadius: 22, paddingLeft: 16, paddingRight: 45, minHeight: 195, overflow: 'hidden' },
+  sparkle: { position: 'absolute', top: 39, right: 18, fontSize: 17, lineHeight: 24, color: colors.sparkle, zIndex: 1 },
+  heroText: { flex: 1, paddingTop: 37, paddingBottom: 10 },
   heroTitle: { fontSize: 20, lineHeight: 28, fontWeight: '600', color: colors.text },
-  heroSubtitle: { fontSize: 13, lineHeight: 18, color: colors.secondary },
-  heroTag: { fontSize: 11, fontWeight: '500', color: colors.accent, marginTop: 12 },
-  healthCard: { backgroundColor: colors.surfaceRaised, borderRadius: 20, padding: 16, gap: 8 },
+  heroSubtitle: { marginTop: 16, fontSize: 13, lineHeight: 18, color: colors.secondary },
+  heroTag: { fontSize: 11, lineHeight: 15, fontWeight: '500', color: colors.accent, marginTop: 25 },
+  healthCard: { backgroundColor: colors.surfaceRaised, borderRadius: 20, paddingHorizontal: 16, paddingTop: 15, paddingBottom: 14 },
   healthCardUrgent: { backgroundColor: colors.dangerBg },
-  healthLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
-  healthRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  healthLabel: { fontSize: 15, lineHeight: 21, fontWeight: '600', color: colors.text },
+  healthRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1, gap: 18 },
   score: { fontSize: 25, lineHeight: 35, fontWeight: '600', color: colors.text },
-  statePill: { height: 26, borderRadius: 13, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  scorePlaceholder: { minWidth: 50 },
+  statePill: { minHeight: 26, borderRadius: 13, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   statePillText: { fontSize: 12, fontWeight: '500' },
   healthHint: { fontSize: 12, lineHeight: 17, color: colors.secondary },
-  deductions: { gap: 4 },
+  deductions: { gap: 4, marginTop: 8 },
   deductionToggle: { color: colors.accent, fontWeight: '600', fontSize: 12 },
   deductionItem: { gap: 1 },
   deductionLine: { color: colors.text, fontSize: 11, lineHeight: 16 },
   deductionMeta: { color: colors.secondary, fontSize: 10, lineHeight: 14 },
   deductionTotal: { color: colors.text, fontSize: 11, fontWeight: '600' },
-  ctaLink: { height: 48, borderRadius: 24, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  ctaLinkText: { fontSize: 16, fontWeight: '600', color: colors.onBrand },
-  urgentLink: { height: 48, borderRadius: 24, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  urgentLinkText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  cta: { height: 'auto', minHeight: 48, marginTop: 12, paddingVertical: 8 },
+  urgentLink: { minHeight: 48, borderRadius: 24, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', marginTop: 12, padding: 8 },
+  urgentLinkText: { fontSize: 16, textAlign: 'center', fontWeight: '600', color: '#FFFFFF' },
+  section: { gap: 6 },
+  sectionHeader: { paddingLeft: 4, minHeight: 24 },
   tiles: { flexDirection: 'row', gap: 12 },
-  tile: { flex: 1, minHeight: 94, borderRadius: 16, backgroundColor: colors.surfaceRaised, alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8 },
-  tileLabel: { fontSize: 12, fontWeight: '500', color: colors.text },
-  tileValue: { fontSize: 12, color: colors.secondary, textAlign: 'center' },
-  quick: { flex: 1, height: 52, borderRadius: 16, backgroundColor: colors.surfaceRaised, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  tile: { flex: 1, minHeight: 94, borderRadius: 16, backgroundColor: colors.surfaceRaised, alignItems: 'center', paddingHorizontal: 6, paddingTop: 13, paddingBottom: 8 },
+  tileLabel: { fontSize: 12, lineHeight: 17, textAlign: 'center', fontWeight: '500', color: colors.text },
+  tileValue: { fontSize: 12, lineHeight: 17, marginTop: 5, color: colors.secondary, textAlign: 'center' },
+  quick: { flex: 1, minHeight: 52, borderRadius: 16, backgroundColor: colors.surfaceRaised, flexDirection: 'row', alignItems: 'center', gap: 4, padding: 7 },
   quickChat: { backgroundColor: colors.brandSoft },
-  quickLabel: { fontSize: 13, fontWeight: '500', color: colors.text },
-  empty: { gap: 8 },
+  quickLabel: { flexShrink: 1, fontSize: 13, lineHeight: 18, fontWeight: '500', color: colors.text },
+  welcomeHero: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.heroBg, borderRadius: radius.lg, paddingLeft: spacing.s5, overflow: 'hidden' },
+  welcomeCopy: { flex: 1, paddingVertical: spacing.s5 },
+  welcomeTitle: { ...typography.pageTitle, color: colors.onBrand },
+  welcomeSubtitle: { ...typography.caption, color: colors.secondary, marginTop: spacing.s2 },
+  welcomeCat: { width: '42%', maxWidth: 146, height: 176, alignSelf: 'flex-end' },
+  profileState: { paddingHorizontal: spacing.s5, paddingVertical: spacing.s4, backgroundColor: colors.surfaceRaised, borderRadius: radius.lg },
+  stateTitle: { ...typography.sectionTitle, color: colors.text },
+  stateDetail: { ...typography.caption, color: colors.secondary, marginTop: spacing.s1 },
   profileLink: { minHeight: 44, color: colors.accent, textDecorationLine: 'underline', paddingVertical: 12, fontSize: 13 },
-  note: { color: colors.secondary, fontSize: 13, lineHeight: 20 },
 });

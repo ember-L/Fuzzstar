@@ -1,12 +1,12 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors } from '../../theme';
 
 // 画板小节标题：Semibold 17 ＋右侧 Regular 12 操作（如「查看全部 ›」）
-export function SectionHeader({ title, actionLabel, onAction }: {
-  title: string; actionLabel?: string; onAction?: () => void;
+export function SectionHeader({ title, actionLabel, onAction, style }: {
+  title: string; actionLabel?: string; onAction?: () => void; style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, style]}>
       <Text style={styles.title}>{title}</Text>
       {actionLabel ? (
         <Pressable accessibilityRole="button" onPress={onAction} hitSlop={8}>

@@ -10,8 +10,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.models import Base, User
-from app.pets import PetInput, create_pet
-from app.tasks import claim_task, enqueue_task, finish_task, requeue_task
+from app.services.pets import PetInput, create_pet
+from app.services.tasks import claim_task, enqueue_task, finish_task, requeue_task
 
 
 class TaskTests(TestCase):

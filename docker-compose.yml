@@ -1,0 +1,81 @@
+name: rongxing
+
+# 所有后端服务共用 backend/.env：本机进程、Alembic、脚本和 Compose 使用同一份配置。
+x-backend: &backend
+  build: ./backend
+  image: rongxing-backend:local
+  env_file: ./backend/.env
+  environment:
+    # backend/.env 里的 REDIS_URL 面向本机；容器内改用服务名。
+    REDIS_URL: redis://redis:6379/0
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file: ./backend/.env
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *backend
+    restart: unless-stopped
+    command: ["python", "-m", "arq", "app.worker.WorkerSettings"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  mail-worker:
+    <<: *backend
+    profiles: ["mail"]
+    restart: "no"
+    command: ["python", "-m", "app.services.mail_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  mysql_data:
+  redis_data:

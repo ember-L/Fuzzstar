@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
+import { Icon } from '../../components/ui/Icon';
 import { api } from '../../lib/api';
 import { AUDIO_FOOTER, AUDIO_MAX_SECONDS, confidenceText, emotionLabel, recordingContentType, validateDuration } from '../../lib/audio-message';
 import { CHAT_INPUT_MAX, chatQueueItem, confirmSend, localPendingId, parseChatBody, toCachedMessage, validateChatInput, type ChatGuidance, type ChatMessage } from '../../lib/chat';
@@ -352,16 +353,21 @@ export default function ChatScreen() {
       </ScrollView>
       <Text style={styles.audioFooter}>{AUDIO_FOOTER}</Text>
       {recorderState.isRecording ? (
-        <Text accessibilityLiveRegion="polite" style={styles.recordingBanner}>录音中… 点 ⏹ 停止并解读（最长 {AUDIO_MAX_SECONDS} 秒）</Text>
+        <View style={styles.recordingBanner}>
+          <Text accessibilityLiveRegion="polite" style={styles.recordingText}>录音中 · 点击停止并解读</Text>
+          <Text style={styles.recordingText}>{recordingSeconds} / {AUDIO_MAX_SECONDS} 秒</Text>
+        </View>
       ) : null}
       {!canUse(quota, 'chat_msg') ? <Text style={styles.notice}>{QUOTA_EXHAUSTED_HINT}（录音解读不占聊天配额。）</Text> : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.inputBar}>
           <Pressable onPress={() => void toggleRecording()} disabled={recordingBusy} accessibilityRole="button"
-            accessibilityLabel={recorderState.isRecording ? '停止录音并解读' : '开始录音'}
-            style={[styles.mic, recorderState.isRecording && styles.micActive]}>
-            {recordingBusy ? <ActivityIndicator color={colors.accent} /> : (
-              <Text style={styles.micText}>{recorderState.isRecording ? `⏹ ${recordingSeconds}s` : '🎤'}</Text>
+            accessibilityLabel={recordingBusy ? '正在解读录音' : recorderState.isRecording ? '停止录音并解读' : '开始录音'}
+            accessibilityState={{ disabled: recordingBusy, busy: recordingBusy }}
+            style={({ pressed }) => [styles.composerAction, styles.mic, (pressed || recorderState.isRecording) && styles.micActive]}>
+            {recordingBusy ? <ActivityIndicator size="small" color={colors.accent} /> : (
+              <Icon name={recorderState.isRecording ? 'stop' : 'microphone'} size={22}
+                color={recorderState.isRecording ? colors.danger : colors.accent} />
             )}
           </Pressable>
           <TextInput
@@ -375,9 +381,11 @@ export default function ChatScreen() {
             accessibilityLabel="聊天输入框"
           />
           <Pressable onPress={() => void submit()} disabled={sendDisabled} accessibilityRole="button"
-            accessibilityLabel="发送" accessibilityState={{ disabled: sendDisabled }}
-            style={[styles.send, sendDisabled && styles.sendDisabled]}>
-            {busy ? <ActivityIndicator color={colors.onBrand} /> : <Text style={styles.sendText}>↑</Text>}
+            accessibilityLabel={busy ? '正在发送' : '发送'} accessibilityState={{ disabled: sendDisabled, busy }}
+            style={({ pressed }) => [styles.composerAction, styles.send, sendDisabled ? styles.sendDisabled : pressed && styles.sendPressed]}>
+            {busy ? <ActivityIndicator size="small" color={colors.onBrand} /> : (
+              <Icon name="arrowUp" size={22} color={sendDisabled ? colors.disabledText : colors.onBrand} />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -408,7 +416,8 @@ const styles = StyleSheet.create({
   guidanceChevron: { fontSize: 21, color: colors.secondary },
   notice: { paddingHorizontal: 16, paddingTop: 8, fontSize: 13, lineHeight: 20, color: colors.secondary },
   pendingBanner: { paddingHorizontal: 16, paddingTop: 6, fontSize: 12, fontWeight: '600', color: colors.warning },
-  recordingBanner: { paddingHorizontal: 16, paddingTop: 6, fontSize: 12, fontWeight: '600', color: colors.danger },
+  recordingBanner: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 8, paddingHorizontal: 16, paddingTop: 6 },
+  recordingText: { fontSize: 12, fontWeight: '600', color: colors.danger, fontVariant: ['tabular-nums'] },
   list: { flex: 1, marginTop: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 12 },
   loadMore: { minHeight: 40, justifyContent: 'center', alignItems: 'center' },
@@ -432,12 +441,12 @@ const styles = StyleSheet.create({
   timestamp: { fontSize: 10, color: colors.timestamp },
   timestampUser: { color: colors.onBrand, textAlign: 'right' },
   audioFooter: { paddingHorizontal: 16, paddingVertical: 3, fontSize: 11, lineHeight: 16, color: colors.secondary },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 22, backgroundColor: colors.surfaceRaised },
-  mic: { minHeight: 34, minWidth: 34, justifyContent: 'center', alignItems: 'center', borderRadius: 17 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginHorizontal: 16, marginBottom: 10, padding: 5, borderRadius: 27, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceRaised },
+  composerAction: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 22 },
+  mic: { backgroundColor: colors.brandSoft },
   micActive: { backgroundColor: colors.dangerBg },
-  micText: { fontSize: 16, fontWeight: '600', color: colors.accent },
-  input: { flex: 1, minHeight: 34, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 6, fontSize: 13, color: colors.text },
-  send: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.brand },
-  sendDisabled: { opacity: 0.5 },
-  sendText: { fontSize: 20, fontWeight: '600', color: colors.onBrand },
+  input: { flex: 1, minWidth: 0, minHeight: 44, maxHeight: 120, paddingHorizontal: 6, paddingVertical: 11, fontSize: 15, lineHeight: 22, color: colors.text },
+  send: { backgroundColor: colors.brand },
+  sendPressed: { backgroundColor: colors.brandPressed },
+  sendDisabled: { backgroundColor: colors.disabledBg },
 });

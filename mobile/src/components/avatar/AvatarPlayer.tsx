@@ -199,7 +199,7 @@ export function AvatarPlayer({ pet, avatar, map, health, emotionEvent }: {
 }
 
 const styles = StyleSheet.create({
-  stage: { width: '100%', height: '100%' },
+  stage: { flex: 1 },
   mediaWrap: { width: '100%', flex: 1 },
   media: { width: '100%', height: '100%' },
 });

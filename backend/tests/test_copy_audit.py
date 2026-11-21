@@ -11,10 +11,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app import audio, chat, feeding, gif, screening_api
-from app.auth import APIError, utcnow
+from app.services import audio, chat, feeding, gif
+from app.routers import screening as screening_api
+from app.core.errors import APIError
+from app.core.security import utcnow
 from app.models import Base, UsageCounter, User
-from app.quota import quota_gate
+from app.services.quota import quota_gate
 
 BACKEND = Path(__file__).resolve().parents[1]
 MOBILE = BACKEND.parent / 'mobile' / 'src' / 'lib'

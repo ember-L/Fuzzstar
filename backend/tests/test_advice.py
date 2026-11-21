@@ -2,7 +2,7 @@
 import unittest
 from pathlib import Path
 
-from app.advice import (AdviceError, build_advice_messages, load_advice_templates,
+from app.services.advice import (AdviceError, build_advice_messages, load_advice_templates,
                         parse_advice, template_advice)
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'

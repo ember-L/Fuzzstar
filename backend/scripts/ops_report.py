@@ -1,6 +1,8 @@
 """T18 read-only ops report: AI calls/cost, task health, quota denials/usage.
 
-Usage: DATABASE_URL=... python -m scripts.ops_report [--days 7] [--json]
+Usage: python -m scripts.ops_report [--days 7] [--json]
+
+Reads backend/.env automatically; DATABASE_URL in the process environment wins.
 Aggregates only; never prints emails, tokens or other personal identifiers.
 """
 import argparse
@@ -12,7 +14,8 @@ from datetime import timedelta
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
+from app.core.env import load_env
+from app.core.security import utcnow
 from app.models import AiUsageLog, QuotaDenial, Task, UsageCounter
 
 
@@ -137,6 +140,7 @@ def render_text(report):
 
 
 def main():
+    load_env()
     parser = argparse.ArgumentParser(description='绒星运营报表（只读）')
     parser.add_argument('--days', type=int, default=7)
     parser.add_argument('--json', action='store_true')

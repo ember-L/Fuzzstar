@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import (AiUsageLog, Base, Pet, QuotaDenial, Task, UsageCounter, User)
 from scripts.ops_report import build_report, render_text
 

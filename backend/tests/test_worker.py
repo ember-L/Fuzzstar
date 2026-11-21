@@ -7,10 +7,10 @@ from uuid import uuid4
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import Base, MediaUpload, Pet, Task, User
-from app.tasks import claim_task, enqueue_task, finish_task
-from app.avatars import ACTIONS, generate_avatar
+from app.services.tasks import claim_task, enqueue_task, finish_task
+from app.services.avatars import ACTIONS, generate_avatar
 from app.providers.fake import FakeImageProvider, FakeVideoProvider
 from app import worker
 

@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import ChatMessage, MediaUpload, Task
 from test_chat import ChatFixture
 

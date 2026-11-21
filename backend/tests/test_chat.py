@@ -11,9 +11,9 @@ from tempfile import TemporaryDirectory
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.chat import (CHAT_DISCLAIMER, REDLINE_SUBTITLE, ChatReplyError, build_persona_messages,
+from app.services.chat import (CHAT_DISCLAIMER, REDLINE_SUBTITLE, ChatReplyError, build_persona_messages,
                       detect_redline, fallback_reply, load_chat_config, parse_chat_reply, redline_response)
-from app.identity import create_email_account, verify_email
+from app.services.identity import create_email_account, verify_email
 from app.models import AiUsageLog
 from app.providers.fake import FakeLLMProvider
 from test_auth_api import AuthAPIFixture

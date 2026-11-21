@@ -3,8 +3,10 @@ import os
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+from app.core.env import load_env
 from app.models import Base
 
+load_env()
 url = os.environ.get('DATABASE_URL')
 if not url:
     raise RuntimeError('DATABASE_URL is required to run database migrations')

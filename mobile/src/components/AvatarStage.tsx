@@ -118,6 +118,6 @@ export function AvatarStage({ pet, submission, health, emotionEvent }: {
 }
 
 const styles = StyleSheet.create({
-  stage: { width: '47%', maxWidth: 165, height: 195, alignSelf: 'flex-end' },
+  stage: { width: '54%', maxWidth: 160, marginTop: 5, marginBottom: 2 },
   caption: { fontSize: 10, lineHeight: 14, color: colors.secondary, textAlign: 'center' },
 });

@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 
-from app.placeholders import DEFAULT_VERSION, build_library
+from app.services.placeholders import DEFAULT_VERSION, build_library
 
 
 def main() -> None:

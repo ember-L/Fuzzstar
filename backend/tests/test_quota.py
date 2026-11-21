@@ -8,10 +8,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import Base, MediaUpload, UsageCounter, User
 from app.providers.fake import FakeLLMProvider
-from app.quota import QuotaExceeded, consume_quota, quota_limits, quota_snapshot
+from app.services.quota import QuotaExceeded, consume_quota, quota_limits, quota_snapshot
 from test_auth_api import AuthAPIFixture
 
 

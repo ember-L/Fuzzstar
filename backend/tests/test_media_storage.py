@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 from PIL import Image
 
-from app.media import PhotoStorage
+from app.services.media import PhotoStorage
 from app.models import MediaUpload
 
 

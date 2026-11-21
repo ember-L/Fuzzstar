@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_auth_api import AuthAPIFixture
-from app.auth import utcnow
-from app.identity import create_email_account, verify_email
+from app.core.security import utcnow
+from app.services.identity import create_email_account, verify_email
 from app.models import HealthEvent, HealthScreening, MediaUpload, ScreeningMedia, Task
 
 DISCLAIMER = 'AI 结果仅供日常健康管理参考,不替代专业兽医诊断'
@@ -179,7 +179,7 @@ class ScreeningReadTests(ScreeningFixture, TestCase):
 class ScreeningMediaDeleteTests(ScreeningFixture, TestCase):
     def setUp(self):
         super().setUp()
-        from app.media import PhotoStorage
+        from app.services.media import PhotoStorage
         env = {'MEDIA_S3_ENDPOINT': 'http://127.0.0.1:9000', 'MEDIA_S3_BUCKET': 'private-photos',
                'MEDIA_S3_ACCESS_KEY': 'test-only', 'MEDIA_S3_SECRET_KEY': 'test-only-secret'}
         with patch.dict('os.environ', env):

@@ -4,10 +4,10 @@ import unittest
 import wave
 from pathlib import Path
 
-from app.audio import (AUDIO_FOOTER, AudioReplyError, build_audio_persona_messages,
+from app.services.audio import (AUDIO_FOOTER, AudioReplyError, build_audio_persona_messages,
                        normalize_emotion, parse_audio_reply)
-from app.chat import EMOTIONS, load_chat_config
-from app.media import MAX_AUDIO_BYTES, valid_audio
+from app.services.chat import EMOTIONS, load_chat_config
+from app.services.media import MAX_AUDIO_BYTES, valid_audio
 from app.providers.base import EmotionResult
 from app.providers.fake import FakeAudioProvider
 

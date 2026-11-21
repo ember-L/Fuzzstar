@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_diet_api import DietFixture
-from app.auth import utcnow
-from app.idempotency import IDEMPOTENCY_TTL, hash_request
+from app.core.security import utcnow
+from app.services.idempotency import IDEMPOTENCY_TTL, hash_request
 from app.models import RequestIdempotency
 from app.worker import _sweep_db
 

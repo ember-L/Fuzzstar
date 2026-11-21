@@ -22,10 +22,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app import main as app_main
-from app.auth import utcnow
-from app.identity import create_email_account, verify_email
+from app.core.security import utcnow
+from app.services.identity import create_email_account, verify_email
 from app.models import Base
-from app.tasks import enqueue_task
+from app.services.tasks import enqueue_task
 
 ENDPOINTS = ('health', 'pets', 'pet_health', 'quota', 'diet_day', 'weights', 'action_map', 'task')
 GATE_MS = 500

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.triage import RulesBundle, load_rules, symptoms_config, triage, validate_answers
+from app.services.triage import RulesBundle, load_rules, symptoms_config, triage, validate_answers
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 

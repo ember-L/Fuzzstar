@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.models import Base, User
-from app.sessions import create_session, rotate_refresh_token
+from app.services.sessions import create_session, rotate_refresh_token
 
 
 class SessionTests(unittest.TestCase):

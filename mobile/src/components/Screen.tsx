@@ -1,12 +1,16 @@
 import { ReactNode } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 
-export function Screen({ children }: { children: ReactNode }) {
+export function Screen({ children, contentStyle, adjustForKeyboard = false }: {
+  children: ReactNode; contentStyle?: StyleProp<ViewStyle>; adjustForKeyboard?: boolean;
+}) {
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.content}>{children}</ScrollView>
+      <ScrollView automaticallyAdjustKeyboardInsets={adjustForKeyboard}
+        keyboardShouldPersistTaps={adjustForKeyboard ? 'handled' : undefined}
+        contentContainerStyle={[styles.content, contentStyle]}>{children}</ScrollView>
     </SafeAreaView>
   );
 }

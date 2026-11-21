@@ -10,7 +10,7 @@ from unittest.mock import patch
 from sqlalchemy.orm import Session
 
 from test_auth_api import AuthAPIFixture
-from app.media import MAX_VIDEO_BYTES, PhotoStorage, valid_video
+from app.services.media import MAX_VIDEO_BYTES, PhotoStorage, valid_video
 from app.models import MediaUpload
 
 

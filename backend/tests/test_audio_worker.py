@@ -11,11 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import worker
-from app.auth import utcnow
-from app.chat import load_chat_config
+from app.core.security import utcnow
+from app.services.chat import load_chat_config
 from app.models import AiUsageLog, ChatMessage, ChatSession, MediaUpload, Pet, Task, User
 from app.providers.fake import FakeAudioProvider, FakeLLMProvider
-from app.tasks import enqueue_task
+from app.services.tasks import enqueue_task
 from test_worker import FakeAssets, make_engine
 
 RULES_DIR = Path(__file__).resolve().parents[1] / "rules"

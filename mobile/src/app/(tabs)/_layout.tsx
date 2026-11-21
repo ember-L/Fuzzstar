@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Tabs } from 'expo-router';
+import { NativeTabs } from 'expo-router/native-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../theme';
 import { Icon, type IconName } from '../../components/ui/Icon';
@@ -42,6 +43,30 @@ function DesignTabBar({ state, descriptors, navigateToTab }: TabBarProps) {
 }
 
 export default function TabLayout() {
+  if (Platform.OS === 'ios' && Number.parseInt(Platform.Version, 10) >= 26) {
+    return (
+      <NativeTabs tintColor={colors.accent} minimizeBehavior="never">
+        <NativeTabs.Trigger name="index">
+          <NativeTabs.Trigger.Label>首页</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="health">
+          <NativeTabs.Trigger.Label>健康</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf="waveform.path.ecg" />
+        </NativeTabs.Trigger>
+        {/* 聊天输入区固定在列表外，由页面的安全区处理底部间距。 */}
+        <NativeTabs.Trigger name="chat" disableAutomaticContentInsets>
+          <NativeTabs.Trigger.Label>聊聊</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf={{ default: 'bubble.left', selected: 'bubble.left.fill' }} />
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="profile">
+          <NativeTabs.Trigger.Label>我的</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} />
+        </NativeTabs.Trigger>
+      </NativeTabs>
+    );
+  }
+
   return (
     <Tabs tabBar={(props) => <DesignTabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="index" options={{ title: '首页' }} />

@@ -5,8 +5,8 @@ from unittest import TestCase
 from sqlalchemy.orm import Session
 
 from test_auth_api import AuthAPIFixture
-from app.auth import utcnow
-from app.feeding import FEEDING_DISCLAIMER
+from app.core.security import utcnow
+from app.services.feeding import FEEDING_DISCLAIMER
 from app.models import DietRecord, WeightRecord
 
 
@@ -41,7 +41,7 @@ class DietFixture(AuthAPIFixture):
             return record.id
 
     def other_headers(self):
-        from app.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account, verify_email
         with Session(self.engine) as db:
             token = create_email_account(db, 'other@example.com', self.password, self.now)
             verify_email(db, token, self.now)
@@ -184,7 +184,7 @@ class FeedingReferenceTests(DietFixture, TestCase):
             self.assertEqual(response.json()['code'], 'CONFIG_UNAVAILABLE')
             self.assertEqual(self.reference().status_code, 503)
         finally:
-            from app.feeding import load_feeding_config
+            from app.services.feeding import load_feeding_config
             from pathlib import Path
             self.client.app.state.feeding_config = load_feeding_config(Path(__file__).resolve().parents[1] / 'rules')
 

@@ -6,15 +6,15 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.auth import utcnow
-from app.identity import create_email_account, verify_email
-from app.consents import grant_consent
+from app.core.security import utcnow
+from app.services.identity import create_email_account, verify_email
+from app.services.consents import grant_consent
 from app.models import (AiUsageLog, AuthSession, Base, ChatMessage, ChatSession, Consent,
                         DeletionJob, DietRecord, HealthScreening, MediaUpload, Pet,
                         RefreshToken, RequestIdempotency, Task, User, UserCredential, WeightRecord)
-from app.privacy import PURGE_DELAY, purge_due, purge_user_data, request_deletion
-from app.sessions import create_session
-from app.tasks import enqueue_task
+from app.services.privacy import PURGE_DELAY, purge_due, purge_user_data, request_deletion
+from app.services.sessions import create_session
+from app.services.tasks import enqueue_task
 from test_auth_api import AuthAPIFixture
 
 

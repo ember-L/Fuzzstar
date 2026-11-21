@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.identity import InvalidCredentials, InvalidVerification, create_email_account, login_email, verify_email
+from app.services.identity import InvalidCredentials, InvalidVerification, create_email_account, login_email, verify_email
 from app.models import Base, UserCredential
 
 

@@ -9,9 +9,9 @@ from unittest.mock import patch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import utcnow
+from app.core.security import utcnow
 from app.models import ChatMessage, QuotaDenial
-from app.observability import log_task_event
+from app.core.observability import log_task_event
 from test_auth_api import AuthAPIFixture
 from test_worker import FakeAssets, FakeImageProvider, FakeVideoProvider, make_engine, seed_task
 
