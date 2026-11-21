@@ -21,6 +21,8 @@ from app.core.security import utcnow
 from app.services.chat import load_chat_config
 from app.services.avatars import S3Assets, generate_avatar
 from app.services.gif import export_gif
+from app.services.motion import generate_motion, load_motion_config
+from app.providers.motion import provider_from_env
 from app.services.idempotency import IDEMPOTENCY_TTL
 from app.models import MediaUpload, QuotaDenial, RequestIdempotency, Task
 from app.core.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
@@ -46,7 +48,7 @@ def _finish(engine, task_id, attempt, result):
 def _load(engine, task_id):
     with Session(engine) as db:
         task = db.get(Task, task_id)
-        media = db.get(MediaUpload, task.payload.get('media_id')) if task.type == 'avatar_batch' else None
+        media = db.get(MediaUpload, task.payload.get('media_id')) if task.type in ('avatar_batch', 'motion_batch') else None
         return task, media
 
 
@@ -70,6 +72,9 @@ async def run_task(ctx, task_id):
                                            chat_config=ctx['chat_config'])
         elif task.type == 'gif_export':
             result = await export_gif(task, assets=ctx['assets'])
+        elif task.type == 'motion_batch':
+            result = await generate_motion(task, media, config=ctx['motion_config'], assets=ctx['assets'],
+                                           provider=ctx['motion_provider'])
         else:
             raise ValueError(f'unsupported task type: {task.type}')
     except Exception:
@@ -139,6 +144,10 @@ async def startup(ctx):
         raise RuntimeError('advice_templates.yaml is required for screening fallback')
     ctx['advice_templates'] = templates
     ctx['triage_rules'] = load_rules(rules_dir)
+    ctx['motion_config'] = load_motion_config(rules_dir)
+    if ctx['motion_config'] is None:
+        raise RuntimeError('motion.yaml is required for motion generation')
+    ctx['motion_provider'] = provider_from_env()  # F14-6：默认本地占位，接真模型只换此处
     chat_config = load_chat_config(rules_dir)
     if chat_config is None:
         raise RuntimeError('chat.yaml is required for audio interpretation')

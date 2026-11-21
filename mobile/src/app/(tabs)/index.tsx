@@ -2,6 +2,7 @@ import { Link, useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AvatarStage, type Submission } from '../../components/AvatarStage';
+import { MotionStage } from '../../components/MotionStage';
 import { GifExport } from '../../components/GifExport';
 import { PhotoUpload } from '../../components/PhotoUpload';
 import { Screen } from '../../components/Screen';
@@ -142,10 +143,14 @@ export default function HomeScreen() {
               <Text style={styles.heroSubtitle}>{'健康的陪伴\n从点滴开始'}</Text>
               <Text style={styles.heroTag}>·  陪伴每一天</Text>
             </View>
-            <AvatarStage key={selected.id} pet={selected}
+            <MotionStage key={selected.id} pet={selected}
               submission={submission?.petId === selected.id ? submission : undefined}
               health={health ? { state: health.state } : null}
-              emotionEvent={emotionEvent?.petId === selected.id ? { id: emotionEvent.id, emotion: emotionEvent.emotion } : null} />
+              emotionEvent={emotionEvent?.petId === selected.id ? { id: emotionEvent.id, emotion: emotionEvent.emotion } : null}
+              fallback={<AvatarStage pet={selected}
+                submission={submission?.petId === selected.id ? submission : undefined}
+                health={health ? { state: health.state } : null}
+                emotionEvent={emotionEvent?.petId === selected.id ? { id: emotionEvent.id, emotion: emotionEvent.emotion } : null} />} />
           </View>
           {/* 健康状态卡片 */}
           <View style={[styles.healthCard, urgent && styles.healthCardUrgent]}>
@@ -235,9 +240,9 @@ export default function HomeScreen() {
               </Link>
             </View>
           </View>
-          {/* 分身上传与 GIF 分享（设计稿未覆盖的功能区，沿用既有组件） */}
-          <SectionHeader title="分身与分享" />
-          <PhotoUpload key={selected.id} pet={selected} quotaExhausted={!canUse(quota, 'avatar_gen')}
+          {/* 萌宠动图上传与 GIF 分享（设计稿未覆盖的功能区，沿用既有组件） */}
+          <SectionHeader title="萌宠动图与分享" />
+          <PhotoUpload key={selected.id} pet={selected} endpoint="motion" quotaExhausted={!canUse(quota, 'avatar_gen')}
             onSubmitted={next => setSubmission({ petId: selected.id, ...next })} />
           <GifExport key={`gif-${selected.id}`} pet={selected} />
           <Link href={`/timeline/${selected.id}`} style={styles.profileLink}>健康时间线（初筛 · 饮食 · 体重）</Link>

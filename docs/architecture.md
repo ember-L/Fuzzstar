@@ -78,7 +78,7 @@ backend/
   app/
     main.py               # FastAPI 装配、中间件、路由注册
     core/                 # config(Settings)、db、deps、errors、security(JWT)、middleware、observability
-    routers/              # auth pets avatars avatar_assets tasks media config screening health diet weights chat quota
+    routers/              # auth pets avatars avatar_assets motion tasks media config screening health diet weights chat quota
     schemas/              # Pydantic 请求/响应模型(与 FRD 字段一一对应)
     models/               # SQLAlchemy ORM，按域拆分(user pet task media health tracker chat platform)
     services/             # 领域逻辑：每域一个模块
@@ -86,9 +86,10 @@ backend/
       feeding.py          # RER/DER 换算
       chat.py             # 聊天人设 prompt 组装(档案+最新初筛)
       avatars.py          # 底图/动作片编排、占位片 manifest
+      motion.py           # 萌化底图+GIF 编排、GIF 规格校验(F14)
       identity.py sessions.py consents.py mail.py mail_worker.py   # 账号、会话、同意、邮件投递
       media.py privacy.py quota.py idempotency.py tasks.py         # 媒体、合规、配额、幂等、任务租约
-    providers/            # 适配层:base.py + dashscope.py + fake.py
+    providers/            # 适配层:base.py + dashscope.py + fake.py + motion.py(AI 接入点,F14-6)
     worker.py             # arq worker:任务分发、租约清扫、媒体/幂等清理
   rules/                  # symptoms.yaml redlines.yaml action_map.yaml scoring.yaml(版本化)
   migrations/             # Alembic
@@ -119,6 +120,8 @@ app/                      # Expo Router
   screening/[id]/result.tsx
 components/
   avatar/AvatarPlayer.tsx # MP4 循环播放+动作状态机+回退链
+  avatar/MotionPet.tsx    # GIF 播放+手势互动+健康待机联动(F14)
+  MotionStage.tsx         # 动图读取/轮询,不可用回退分身舞台
   screening/... chat/... diet/...
 stores/                   # Zustand:session pets health chat quota
 lib/
@@ -237,7 +240,8 @@ flowchart LR
 - 占位片库:`scripts/build_placeholder_library.py` 一次性生成 3 体型×7 动作,manifest 版本化下发;兼作冷启动与永久兜底。
 - 替换时机:仅待机态触发替换,淡入淡出 300ms,避免动作中途穿帮。
 - 分享导出:`gif_export` 任务将指定 action 的 MP4 转码 GIF(仅导出用,运行时不播 GIF)。
-- 回退链与触发映射的产品验收见 `product/FRD.md` F03 与附录 C。
+- 萌宠动图(F14,运行时可播 GIF):`motion_batch` 先萌化底图,再逐动作产出 ≤7s 循环 GIF,存 `motions/{pet_id}/{task_id}/{action}.gif`;单动作失败不影响其余,`min_ready` 达标即 `usable`。客户端优先播动图,不可用回退本条回退链。AI 只在 `providers/motion.py` 的 `MotionProvider` 接入,未接入时占位实现离线可跑通。
+- 回退链与触发映射的产品验收见 `product/FRD.md` F03、F14 与附录 C。
 
 ## ⚖️ 分诊规则引擎与健康分
 
@@ -491,6 +495,8 @@ erDiagram
 | 分身 | POST /pets/{id}/avatar | 触发 avatar_batch(配额 avatar_gen) |
 | 分身 | GET /pets/{id}/avatar | 底图+clips+状态 |
 | 分身 | GET /avatar/placeholder-manifest | 占位片库版本化清单 |
+| 萌宠动图 | POST /pets/{id}/motion | 触发 motion_batch(配额 avatar_gen,与分身共用) |
+| 萌宠动图 | GET /pets/{id}/motion | 萌化底图+gifs+状态+配置 |
 | 初筛 | POST /pets/{id}/screenings | 问卷+媒体 URL;红线不限额 |
 | 初筛 | GET /screenings/{id} | 结果(含 task 状态) |
 | 初筛 | GET /pets/{id}/screenings | 历史列表 |
@@ -505,6 +511,7 @@ erDiagram
 | 任务 | GET /tasks/{id} | 轮询契约见上文 |
 | 配额 | GET /quota | 当日用量/上限 |
 | 配置 | GET /config/action-map | 动作映射(版本化) |
+| 配置 | GET /config/motion | 萌宠动图动作/状态/手势映射(版本化) |
 | 配置 | GET /config/symptoms | 症状清单+追问项(版本化) |
 | 分享 | POST /pets/{id}/share/gif | gif_export 任务 |
 | 订阅 | GET /plans、GET /me/entitlement | 预留只读,不接支付 |

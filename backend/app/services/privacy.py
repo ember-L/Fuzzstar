@@ -36,7 +36,7 @@ def _delete_oss_objects(db: Session, user_id: int, storage) -> None:
             kwargs['VersionId'] = media.version_id
         storage.client.delete_object(**kwargs)
     tasks = db.scalars(select(Task).where(Task.pet_id.in_(pet_ids),
-                                          Task.type.in_(['avatar_batch', 'gif_export']),
+                                          Task.type.in_(['avatar_batch', 'gif_export', 'motion_batch']),
                                           Task.result.is_not(None))).all()
     for task in tasks:
         result = task.result or {}
@@ -44,7 +44,8 @@ def _delete_oss_objects(db: Session, user_id: int, storage) -> None:
         base = result.get('base_image')
         if isinstance(base, dict) and base.get('key'):
             entries.append(base)
-        for clip in (result.get('clips') or {}).values():
+        assets = list((result.get('clips') or {}).values()) + list((result.get('gifs') or {}).values())
+        for clip in assets:
             if isinstance(clip, dict) and clip.get('status') == 'ready' and clip.get('key'):
                 entries.append(clip)
         if result.get('key'):  # gif_export result

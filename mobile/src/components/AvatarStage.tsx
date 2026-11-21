@@ -12,7 +12,7 @@ import { colors } from '../theme';
 
 export interface Submission {
   taskId: string;
-  placeholder: PlaceholderManifest;
+  placeholder?: PlaceholderManifest;
 }
 
 // 首页分身舞台：提交后立即播放占位首帧（AC-03-1），轮询任务，播放交给 AvatarPlayer。
@@ -96,16 +96,18 @@ export function AvatarStage({ pet, submission, health, emotionEvent }: {
   }, [fetchAvatar, track]);
 
   useEffect(() => {
-    if (submission) void Promise.resolve().then(() => track(submission.taskId));
+    if (submission?.placeholder) void Promise.resolve().then(() => track(submission.taskId));
   }, [submission, track]);
 
-  // 提交后立即用占位清单渲染（无需等待额外请求）；同任务的服务端结果到达后切换。
-  const avatar: AvatarView | null = submission
-    ? (fetched?.task_id === submission.taskId ? fetched : {
-        task_id: submission.taskId, status: 'pending', body_type: submission.placeholder.body_type,
-        base_image: null, clips: {}, ready_count: 0, usable: false, placeholder_manifest: submission.placeholder,
-      })
-    : fetched;
+  // 提交后立即用占位清单渲染（无需等待额外请求）；动图通道提交没有占位清单，交给静态底图兜底。
+  const placeholder = submission?.placeholder;
+  const pending: AvatarView | null = submission && placeholder
+    ? {
+        task_id: submission.taskId, status: 'pending', body_type: placeholder.body_type,
+        base_image: null, clips: {}, ready_count: 0, usable: false, placeholder_manifest: placeholder,
+      }
+    : null;
+  const avatar: AvatarView | null = fetched ?? pending;
   const caption = notice && avatar && notice.taskId === avatar.task_id ? notice.text
     : avatar && (avatar.status === 'pending' || avatar.status === 'running') ? '分身生成中…' : '';
 
