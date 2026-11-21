@@ -310,6 +310,7 @@ node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs
 | [设计系统](docs/design.md) | 色彩、排版、组件与动效规范 |
 | [功能与 API](docs/features.md) | 当前功能细节、联调步骤与本地 API 范围 |
 | [运维 Runbook](docs/operations.md) | 环境变量、日志、迁移 / 备份、告警与回归矩阵 |
+| [团队协作与 Git 工作流](docs/collaboration.md) | 分支模型、PR 门禁、评审清单与发布约定 |
 | [交付计划](docs/plans/2026-11-17-rongxing-full-stack.md) | 历史任务拆分与验收记录 |
 
 ## 🩺 常见问题

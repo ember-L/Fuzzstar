@@ -9,6 +9,7 @@
 | 新成员 | [产品总览](product/PRODUCT.md) → [架构](architecture.md) → [功能与 API](features.md) → [运维](operations.md) |
 | 产品/设计 | [产品 Brief](product/产品Brief.md) → [PRD](product/PRD.md) → [FRD](product/FRD.md) → [设计系统](design.md) |
 | 后端开发 | [架构](architecture.md) → [FRD](product/FRD.md) → [功能与 API](features.md) → [运维](operations.md) |
+| 全体成员 | [团队协作与 Git 工作流](collaboration.md) → [文档索引维护约定](#维护约定) |
 | 测试/发布 | [FRD 验收与内测门槛](product/FRD.md) → [运维 Runbook](operations.md) → [交付计划](plans/2026-11-17-rongxing-full-stack.md) |
 
 ## 文档清单
@@ -24,6 +25,7 @@
 | [design.md](design.md) | 设计令牌、组件、状态卡与动效规范 | 视觉规范变化 |
 | [features.md](features.md) | 当前功能行为、可选服务联调、本地 API 范围 | 功能交付/接口变化 |
 | [operations.md](operations.md) | 环境变量、日志与脱敏、迁移/备份、告警、回归矩阵 | 运维流程变化 |
+| [collaboration.md](collaboration.md) | 分支模型、PR 门禁、评审清单、发布与版本约定 | 协作方式或流程变化 |
 | [plans/](plans/) | 历史任务拆分与执行记录（按日期归档） | 只追加，不回填 |
 
 ## 维护约定
