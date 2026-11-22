@@ -47,9 +47,8 @@
 - 规则判定核心：`app/services/triage.py:184-218`（红线最先硬判 urgent → 基础项 vet → 症状最高档 → normal，纯函数可复现）；AI 建议 `advice.py`、健康分 `health.py:11-36`（读时衰减，observe 72h）。
 - 任务：`app/services/tasks.py` 幂等入队/租约 15min/最多 3 次；worker `app/worker.py`（arq，max_jobs=2，sweep 每 5s）。DB 为队列真源，Redis 宕不丢任务。
 - Provider：`app/providers/dashscope.py`（qwen-image-edit / wanx2.1-i2v-turbo / qwen-max / qwen-plus / qwen2-audio），`fake.py` 全链路假实现。
-- 萌宠动图（F14）：`app/providers/motion.py` 持 `MotionProvider` 协议（enchant/animate），`provider_from_env` 按 `MOTION_PROVIDER` 选择 `placeholder`（离线程序化绘制）或 `cogvideo`（智谱 CogVideoX-Flash 图生视频）。规则在 `rules/motion.yaml`（12 动作、健康/手势/情绪映射），产物 GIF 规格硬约束 ≤7s/高 480/循环，由 `app/services/motion.py:verify_gif` 逐条校验。
-- 真实视频模型（`app/providers/cogvideo.py`）：首帧方形底板 1024x1024（贴同色背景，与客户端方形头像位一致）→ 智谱 `cogvideox-flash`（5s/`quality`/`with_audio=false`）→ mp4 → ffmpeg 转 12fps/高 480/无限循环 GIF，并按实际分辨率 `delogo` 擦除右下角"AI生成"角标。限流返回 429，provider 内部指数退避；系统无 ffmpeg 时用 `imageio-ffmpeg` 自带静态二进制（已加进 requirements）。
-- 离线批量：`python -m scripts.pregen_motion_assets --key <key>` 按交互优先级出 GIF 到 `backend/assets/motion/`；`python -m scripts.seed_motion_assets` 把这些 GIF 写入 MinIO `motions/{pet_id}/{task_id}/` 并建一条 succeeded 的 `motion_batch` 任务，客户端零改动即可播。
+- 萌宠动图（F14）：`app/providers/motion.py` 持 `MotionProvider` 协议（enchant/animate），`provider_from_env` 是唯一接入点，当前仅 `placeholder`（离线程序化绘制）；接入真模型时在此加分支，模型名与凭据由外部配置提供，不写入仓库。规则在 `rules/motion.yaml`（12 动作、健康/手势/情绪映射），产物 GIF 规格硬约束 ≤7s/高 480/循环，由 `app/services/motion.py:verify_gif` 逐条校验。
+- 预生成资产入库：`scripts/seed_motion_assets.py` 把本地 GIF 写入 MinIO `motions/{pet_id}/{task_id}/` 并刷新 succeeded 的 `motion_batch` 任务，客户端零改动。产物体积大，不入库。
 - 测试：`backend/tests/` 43 文件，unittest + 临时 SQLite + TestClient，**无 conftest.py**。`python -m pytest -q` 或 `python -m unittest discover -s tests`。
 - 启动：`cd backend && uvicorn app.main:create_dev_app --factory --host 127.0.0.1 --port 8000`。全栈用 `docker compose up --build -d`（MySQL/Redis/migrate/api/worker）。
 - 演示数据：`python -m scripts.seed_demo` → demo@rongxing.app / Rongxing2026（幂等，重置密码）。
@@ -97,8 +96,6 @@ git -c http.sslBackend=openssl pull --ff-only
 ## 当前状态与待办（不虚构）
 
 - 已完成：F01–F13 的 P0 本地实现与 417 后端 / 155 前端用例；MySQL 迁移回滚、备份恢复演练；本地 p95 2.34ms（n=1600）；Web 端四路由实测可渲染。
-- F14 萌宠动图：上传→生成→播放全链路本地跑通；真实模型 `MOTION_PROVIDER=cogvideo`（智谱 CogVideoX-Flash）已接入并产出可用 GIF（当前 12 个动作里 5 个就绪：idle/play/look_left/alert/sick），已 seed 到 MinIO 并对 demo 账号下发（`usable: true`）。
-- **CogVideoX-Flash 免费档实测**：成功任务 40–75 秒出片，其余提交 100% 返回 `1305`（0.1 秒秒回、无重试头）；静默 5 分钟后单发仍 1305，说明是池容量门禁而非日配额或自身频率。挂住超 25 分钟的任务最终必报 `1234 网络错误`。补齐剩余 7 个动作靠后台低频守候（`--retry-interval 45 --seed`），出片即自动入库，无需人工再 seed。
-- 内容审核会误判无害动作词（`1301`）：睡觉/趴卧、打哈欠/张大嘴、转向右侧均中过招，`scripts/pregen_motion_assets.py` 的 `PROMPT_OVERRIDES` 已换中性表述。
+- F14 萌宠动图：上传→生成→播放全链路本地跑通；占位实现可离线产出全部 12 个动作。此前离线预生成的 11 个 GIF 已 seed 到 MinIO 并对 demo 账号下发（`usable: true`），产物不在仓库内。
 - **待外部**：真实 DashScope 生成/建议/音频质量、真实 SMTP/S3、生产 HTTPS、真机指标与 crash-free（Sentry）、100 宠并发压测、兽医评审、Figma 授权与原创占位素材、TestFlight/APK 内测。
 - 本机坑：git 直连偶发 schannel TLS 握手失败，加 `-c http.sslBackend=openssl`；浏览器 headless 前台启动会被回收，须后台保活。
