@@ -220,12 +220,4 @@ def provider_from_env(env: Optional[dict] = None) -> MotionProvider:
     kind = (env.get('MOTION_PROVIDER') or 'placeholder').strip()
     if kind == 'placeholder':
         return PlaceholderMotionProvider()
-    if kind == 'cogvideo':
-        # F14-6：真模型接入点。智谱 CogVideoX-Flash 图生视频，免费档限流由 provider 内部退避。
-        from app.providers.cogvideo import CogVideoMotionProvider
-
-        key = (env.get('COGVIDEO_API_KEY') or env.get('ZHIPU_API_KEY') or '').strip()
-        if not key:
-            raise RuntimeError('COGVIDEO_API_KEY is required when MOTION_PROVIDER=cogvideo')
-        return CogVideoMotionProvider(api_key=key)
     raise RuntimeError(f'unknown MOTION_PROVIDER: {kind}')
