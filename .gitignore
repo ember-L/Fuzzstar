@@ -9,3 +9,6 @@ backend/*.db
 backend/.env
 .env
 .impeccable/
+# 离线生成的萌宠动图：由 scripts/pregen_motion_assets.py 产出，体积大不入库
+backend/assets/motion/
+backend/tmp_out/
