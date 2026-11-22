@@ -14,8 +14,9 @@ from PIL import Image, ImageDraw
 
 from app.providers.base import GeneratedAsset
 
-BG = (255, 247, 236)
-SHADOW = (238, 222, 200)
+# 与首页 hero 卡片同色（theme.ts heroBg #FFEDD7），落地即融合，不出现白底方块。
+BG = (255, 237, 215)
+SHADOW = (246, 226, 200)
 BELLY = (255, 240, 222)
 LINE = (104, 58, 24)
 EYE = (58, 36, 20)
@@ -192,7 +193,7 @@ def _encode_gif(frames: list[Image.Image], fps: int) -> bytes:
 class PlaceholderMotionProvider:
     """本地占位实现：无网络、无第三方素材，产出可直接播放的萌化底图与动作 GIF。"""
 
-    def __init__(self, *, seconds: float = 3.0, fps: int = 10, height: int = 320):
+    def __init__(self, *, seconds: float = 3.0, fps: int = 12, height: int = 480):
         self.seconds = seconds
         self.fps = fps
         self.height = height
@@ -219,4 +220,12 @@ def provider_from_env(env: Optional[dict] = None) -> MotionProvider:
     kind = (env.get('MOTION_PROVIDER') or 'placeholder').strip()
     if kind == 'placeholder':
         return PlaceholderMotionProvider()
+    if kind == 'cogvideo':
+        # F14-6：真模型接入点。智谱 CogVideoX-Flash 图生视频，免费档限流由 provider 内部退避。
+        from app.providers.cogvideo import CogVideoMotionProvider
+
+        key = (env.get('COGVIDEO_API_KEY') or env.get('ZHIPU_API_KEY') or '').strip()
+        if not key:
+            raise RuntimeError('COGVIDEO_API_KEY is required when MOTION_PROVIDER=cogvideo')
+        return CogVideoMotionProvider(api_key=key)
     raise RuntimeError(f'unknown MOTION_PROVIDER: {kind}')
