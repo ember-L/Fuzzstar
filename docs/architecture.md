@@ -89,7 +89,7 @@ backend/
       motion.py           # 萌化底图+GIF 编排、GIF 规格校验(F14)
       identity.py sessions.py consents.py mail.py mail_worker.py   # 账号、会话、同意、邮件投递
       media.py privacy.py quota.py idempotency.py tasks.py         # 媒体、合规、配额、幂等、任务租约
-    providers/            # 适配层:base.py + dashscope.py + fake.py + motion.py(AI 接入点,F14-6)
+    providers/            # 适配层:base.py + dashscope.py + fake.py + motion.py(AI 接入点,F14-6) + cogvideo.py(CogVideoX-Flash 图生视频,F14-7)
     worker.py             # arq worker:任务分发、租约清扫、媒体/幂等清理
   rules/                  # symptoms.yaml redlines.yaml action_map.yaml scoring.yaml(版本化)
   migrations/             # Alembic
@@ -241,6 +241,7 @@ flowchart LR
 - 替换时机:仅待机态触发替换,淡入淡出 300ms,避免动作中途穿帮。
 - 分享导出:`gif_export` 任务将指定 action 的 MP4 转码 GIF(仅导出用,运行时不播 GIF)。
 - 萌宠动图(F14,运行时可播 GIF):`motion_batch` 先萌化底图,再逐动作产出 ≤7s 循环 GIF,存 `motions/{pet_id}/{task_id}/{action}.gif`;单动作失败不影响其余,`min_ready` 达标即 `usable`。客户端优先播动图,不可用回退本条回退链。AI 只在 `providers/motion.py` 的 `MotionProvider` 接入,未接入时占位实现离线可跑通。
+- 真实模型链路(F14-7):`providers/cogvideo.py` 用智谱 CogVideoX-Flash 做图生视频,首帧为方形底板(1024x1024,与客户端方形头像位一致),产物 mp4 经 ffmpeg 转 12fps/高 480/无限循环 GIF,并按实际分辨率擦除右下角"AI生成"角标。免费档限流返回 429,由 provider 指数退避重试;离线批量预生成用 `scripts/pregen_motion_assets.py`,入库用 `scripts/seed_motion_assets.py`。
 - 回退链与触发映射的产品验收见 `product/FRD.md` F03、F14 与附录 C。
 
 ## ⚖️ 分诊规则引擎与健康分
