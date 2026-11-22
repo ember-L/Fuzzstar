@@ -68,7 +68,9 @@ export function MotionPet({ pet, view, config, health, emotionEvent }: {
   }), [interact]);
 
   const candidate = broken[machine.action] ? null : gifUrl(view, machine.action);
-  const source = candidate ?? (broken.base ? null : view?.base_image?.url ?? null);
+  // 该动作尚无产物时回退待机动图（猫仍在呼吸），比定格底图更像活着；待机也缺失才用静态底图。
+  const standbyGif = machine.action === standby || broken[standby] ? null : gifUrl(view, standby);
+  const source = candidate ?? standbyGif ?? (broken.base ? null : view?.base_image?.url ?? null);
 
   useEffect(() => {
     if (source === display) return;
@@ -96,7 +98,12 @@ export function MotionPet({ pet, view, config, health, emotionEvent }: {
               source={{ uri: display }}
               style={styles.media}
               resizeMode="contain"
-              onError={() => setBroken(prev => (candidate ? { ...prev, [machine.action]: true } : { ...prev, base: true }))}
+              onError={() => setBroken(prev => {
+                // 按实际失败的那一层记标记：本动作 → 待机回退 → 静态底图。
+                if (candidate) return { ...prev, [machine.action]: true };
+                if (standbyGif) return { ...prev, [standby]: true };
+                return { ...prev, base: true };
+              })}
             />
           ) : (
             <Animated.Image source={STATIC_IMAGE} style={styles.media} resizeMode="contain" />
