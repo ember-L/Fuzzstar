@@ -11,13 +11,13 @@
 | --- | --- |
 | 要不要建 `develop` / 长期 `dev` 分支？ | **不要**。多一条长期分支就要多一轮合并，内测阶段只会增加冲突与"哪边是真相"的成本。 |
 | 每次改代码要不要开分支？ | **要**。包括一行修复、文档、依赖升级。分支从 `main` 切出，1–3 天内合回并删除。 |
-| `main` 能不能直接提交？ | **不能**。`main` 受保护、只接受 PR，随时可发布。 |
+| `main` 能不能直接提交？ | **队员不能，管理员可以**。`main` 对队员只接受 PR；管理员（仓库 owner）保留直推能力，用于合并收尾与线上回滚。 |
 | 发布怎么管？ | **用 tag 冻结**（`v0.1.0-beta.1`），不靠分支。只有"已上线版本要单独修 bug"时才临时切 `release/x.y`。 |
 
-一句话：**`main` 受保护 + 任务分支（短命）+ Squash PR + 语义化 tag**，即主干开发（trunk-based）加 PR 门禁。
+一句话：**`main` 受保护 + 任务分支（短命）+ Squash PR + 语义化 tag**，即主干开发（trunk-based）加 PR 门禁；管理员保留绕过门禁的直推通道。
 
 ```text
-main   ──●────●─────────●─────────●──────▶  只接受 PR，随时可发布
+main   ──●────●─────────●─────────●──────▶  队员走 PR，管理员可直推
           \            /          /
  feat/a    ●──●──●─────            /        1–3 天，合并即删
                         \        /
@@ -73,16 +73,18 @@ git push origin v0.1.0-beta.1
 
 | 选项 | 设置 | 原因 |
 | --- | --- | --- |
-| Require a pull request before merging | ✅ | 禁止直推 |
+| Require a pull request before merging | ✅ | 禁止队员直推（管理员可绕过） |
 | Required approvals | **1** | 双人复核；3 人以下团队也不要设 0 |
 | Dismiss stale approvals when new commits are pushed | ✅ | 改完要重新看 |
 | Require review from Code Owners | 有 `CODEOWNERS` 时 ✅ | 领域 owner 兜底 |
 | Require conversation resolution | ✅ | 评论不能"看过就算" |
 | Require linear history | ✅ | 配合 Squash，保持 `main` 单线 |
-| Do not allow bypassing the above settings | ✅（Include administrators） | 管理员也不破例 |
+| Do not allow bypassing the above settings | ❌（不勾 Include administrators） | 管理员可直推、可自合，用于收尾与回滚 |
 | Allow force pushes | ❌ | 保护历史 |
 | Allow deletions | ❌ | 防止误删主干 |
 | Require status checks to pass | CI 落地后 ✅ | 勾选 `backend-tests`、`mobile-checks`（见附录 A） |
+
+> **本仓库当前的实际状态**：`Include administrators` 已关闭（`enforce_admins=false`），其余保护照旧（1 approval、linear history、禁强推、禁删）。代价是管理员直推时这些限制一起失效，所以直推只用于两类场景：合并后的收尾提交、线上故障回滚。日常改动仍走 PR——少了 PR，diff 与评审记录就断了。
 
 ### 2.4 成员与权限
 
@@ -245,7 +247,7 @@ feat(rules)!: 健康初筛规则包升到 v3
 
 ### 6.3 评审
 
-- 至少 **1 位** reviewer；作者不能自批（管理员也不例外）。
+- 至少 **1 位** reviewer；作者不能自批。管理员可以直推，但日常改动仍走 PR，否则评审记录会断。
 - 首轮响应 **24 小时内**；超时在站会升级。
 - 评审人只看 diff + 关联文档 + 测试证据，不要求作者口头解释。
 - 评论用 `nit:` 标注非阻塞建议，避免"改了十轮还在抠格式"。
