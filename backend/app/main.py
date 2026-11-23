@@ -25,6 +25,7 @@ from app.routers.config import router as config_router
 from app.routers.diet import router as diet_router
 from app.routers.health import router as health_router
 from app.routers.media import router as media_router
+from app.routers.motion import router as motion_router
 from app.routers.pets import router as pet_router
 from app.routers.quota import router as quota_router
 from app.routers.screening import router as screening_router
@@ -39,6 +40,7 @@ ROUTERS = (
     pet_router,
     avatar_router,
     avatar_assets_router,
+    motion_router,
     task_router,
     media_router,
     config_router,
@@ -79,6 +81,7 @@ def create_app(settings: Settings) -> FastAPI:
     instance.state.advice_templates = settings.advice_templates
     instance.state.feeding_config = settings.feeding_config
     instance.state.chat_config = settings.chat_config
+    instance.state.motion_config = settings.motion_config
     instance.state.chat_llm_provider = settings.chat_llm_provider
     instance.state.placeholder_library = settings.placeholder_library
 

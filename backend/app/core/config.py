@@ -19,6 +19,7 @@ from app.services.advice import load_advice_templates
 from app.services.chat import load_chat_config
 from app.services.feeding import load_feeding_config
 from app.services.media import PhotoStorage
+from app.services.motion import load_motion_config
 from app.services.placeholders import load_library
 from app.services.rules import load_action_map
 from app.services.triage import load_rules
@@ -41,6 +42,7 @@ class Settings:
     advice_templates: Any
     feeding_config: Any
     chat_config: Any
+    motion_config: Any
     chat_llm_provider: Any
     placeholder_library: Any
 
@@ -86,6 +88,7 @@ class Settings:
             advice_templates=load_advice_templates(rules_dir),
             feeding_config=load_feeding_config(rules_dir),
             chat_config=load_chat_config(rules_dir),
+            motion_config=load_motion_config(rules_dir),
             chat_llm_provider=DashScopeLLMProvider(dashscope_key, model='qwen-plus') if dashscope_key else None,
             placeholder_library=load_library(placeholder_dir),
         )

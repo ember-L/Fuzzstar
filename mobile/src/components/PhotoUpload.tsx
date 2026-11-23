@@ -11,10 +11,11 @@ import { ApiError } from '../lib/session';
 import { colors } from '../theme';
 import type { Submission } from './AvatarStage';
 
-export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
+export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false, endpoint = 'avatar' }: {
   pet: { id: number; name: string };
   onSubmitted?: (submission: Submission) => void;
   quotaExhausted?: boolean;
+  endpoint?: 'avatar' | 'motion';
 }) {
   const [photo, setPhoto] = useState<{ file: Blob; name: string }>();
   const [message, setMessage] = useState('');
@@ -62,6 +63,24 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
     onSubmitted?.({ taskId: submitted.task_id, placeholder: submitted.placeholder_manifest });
   }
 
+  // F14-1：动图通道为主路径；配置缺失或路由未部署时回退分身生成，已上传的照片不浪费。
+  async function submitGeneration(mediaId: string, signal: AbortSignal) {
+    if (endpoint !== 'motion') return submitAvatar(mediaId, signal);
+    try {
+      const submitted = await api.authorized<{ task_id: string; status: string }>(`/pets/${pet.id}/motion`, {
+        method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ media_id: mediaId }),
+      });
+      if (!/^[0-9a-f]{32}$/.test(submitted?.task_id ?? '')) throw new PhotoUploadError('未获得有效的生成任务。');
+      setLastMediaId(mediaId);
+      onSubmitted?.({ taskId: submitted.task_id });
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 405 || error.status === 503)) {
+        return submitAvatar(mediaId, signal);
+      }
+      throw error;
+    }
+  }
+
   async function submit() {
     if (!photo || operation.current) return;
     const controller = new AbortController();
@@ -73,8 +92,8 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
     try {
       const mediaId = await uploadPhoto(pet.id, photo.file, api.authorized, sendUpload, controller.signal);
       setPhoto(undefined);
-      setMessage('照片已验证，正在提交分身生成…');
-      await submitAvatar(mediaId, controller.signal);
+      setMessage(endpoint === 'motion' ? '照片已验证，正在提交萌宠动图生成…' : '照片已验证，正在提交分身生成…');
+      await submitGeneration(mediaId, controller.signal);
       setMessage('');
     } catch (error) {
       if (operation.current !== controller) return;
@@ -95,7 +114,7 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
     operation.current = controller;
     setBusy(true);
     try {
-      await submitAvatar(lastMediaId, controller.signal);
+      await submitGeneration(lastMediaId, controller.signal);
       setMessage('');
     } catch (error) {
       if (operation.current === controller) {
@@ -115,7 +134,7 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false }: {
   return (
     <View style={styles.card}>
       <Text accessibilityRole="header" style={styles.title}>给{pet.name}上传照片</Text>
-      <Text style={styles.note}>JPG、PNG 或 HEIC，单张不超过 10 MiB。验证通过后自动生成 7 个动作的分身素材。</Text>
+      <Text style={styles.note}>JPG、PNG 或 HEIC，单张不超过 10 MiB。验证通过后自动生成一整套萌化动作动图。</Text>
       {photo ? <Text style={styles.note}>待上传：{photo.name}</Text> : null}
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
