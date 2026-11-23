@@ -1,0 +1,140 @@
+# 附录 A 症状清单与追问分级默认表（FRD.md:230-252）。全部默认值，上线前兽医评审。
+# 分档语义: '<2h'=[0,2) '2-12h'=[2,12) '12-24h'=[12,24) '>24h'=[24,∞)
+# 条件匹配: 列出的每个键都须命中答案值；未命中 vet 条件的选中症状底线 observe。
+version: sx-2026-11-19
+duration_bands: ['<2h', '2-12h', '12-24h', '>24h']
+frequency_bands: ['1', '2-3', '4-6', '>6']
+spirit_options: [normal, slightly_down, markedly_down]
+appetite_options: [normal, decreased, refused]
+vet_triggers:
+  spirit: [markedly_down]
+  appetite: [refused]
+notes_max: 255
+symptoms:
+  - code: vomiting
+    label: 呕吐
+    frequency: true
+    observe:
+      - {duration: ['<2h', '2-12h'], frequency: ['1', '2-3'], spirit: [normal], appetite: [normal]}
+    vet:
+      - {frequency: ['4-6', '>6']}
+      - {duration: ['12-24h']}
+  - code: diarrhea
+    label: 软便/腹泻
+    frequency: true
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h'], frequency: ['1', '2-3'], spirit: [normal]}
+    vet:
+      - {duration: ['>24h']}
+      - {frequency: ['>6']}
+      - {spirit: [slightly_down, markedly_down]}
+  - code: constipation
+    label: 便秘/排便困难
+    frequency: false
+    severe_label: 伴呕吐
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h']}
+    vet:
+      - {duration: ['>24h']}
+      - {severe: true}
+  - code: appetite_down
+    label: 食欲下降
+    frequency: false
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h'], appetite: [decreased]}
+    vet:
+      - {duration: ['>24h']}
+      - {appetite: [refused]}
+  - code: lethargy
+    label: 精神萎靡
+    frequency: false
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h'], spirit: [slightly_down]}
+    vet:
+      - {spirit: [markedly_down]}
+      - {duration: ['>24h']}
+  - code: cough_sneeze
+    label: 咳嗽/打喷嚏
+    frequency: true
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h'], frequency: ['1', '2-3']}
+    vet:
+      - {duration: ['>24h']}
+      - {frequency: ['>6']}
+  - code: eye_nose_discharge
+    label: 眼鼻分泌物
+    frequency: false
+    severe_label: 脓性/带血
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h']}
+    vet:
+      - {severe: true}
+      - {duration: ['>24h']}
+  - code: skin_itch_hairloss
+    label: 瘙痒/脱毛
+    frequency: false
+    severe_label: 大面积/破溃/持续加重
+    observe:
+      - {severe: false}
+    vet:
+      - {severe: true}
+  - code: urination_abnormal
+    label: 排尿异常（频/少/嚎叫）
+    frequency: true
+    severe_label: 尿量明显减少或伴疼痛
+    observe:
+      - {duration: ['<2h', '2-12h'], severe: false}
+    vet:
+      - {severe: true}
+  - code: limping
+    label: 跛行/不愿跳跃
+    frequency: false
+    severe_label: 患肢不敢着地
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h']}
+    vet:
+      - {duration: ['>24h']}
+      - {severe: true}
+  - code: weight_loss
+    label: 体重下降
+    frequency: false
+    severe_label: 7 天内下降 ≥10%
+    observe:
+      - {severe: false}
+    vet:
+      - {severe: true}
+  - code: feverish
+    label: 发热迹象（耳尖/腹股沟烫、发抖）
+    frequency: false
+    observe:
+      - {duration: ['<2h', '2-12h'], spirit: [normal], appetite: [normal]}
+    vet:
+      - {duration: ['12-24h', '>24h']}
+      - {spirit: [slightly_down, markedly_down]}
+      - {appetite: [decreased, refused]}
+  - code: ear_abnormal
+    label: 耳部异常（甩耳/抓耳/异味）
+    frequency: false
+    severe_label: 分泌物多/异味重/持续加重
+    observe:
+      - {duration: ['<2h', '2-12h', '12-24h'], severe: false}
+    vet:
+      - {duration: ['>24h']}
+      - {severe: true}
+  - code: oral_odor
+    label: 口臭/口腔异常
+    frequency: false
+    severe_label: 伴流涎/进食困难
+    observe:
+      - {severe: false}
+    vet:
+      - {severe: true}
+  - code: drooling
+    label: 流涎
+    frequency: true
+    severe_label: 持续流涎或伴口腔异常
+    observe:
+      - {frequency: ['1'], severe: false}
+    vet:
+      - {frequency: ['2-3', '4-6', '>6']}
+      - {severe: true}

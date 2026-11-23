@@ -1,0 +1,140 @@
+{
+  "version": "v1",
+  "art": "programmatic-placeholder-v1",
+  "spec": {
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "duration_s": 4.0,
+    "codec": "h264",
+    "audio": false,
+    "loop_aligned": true
+  },
+  "body_types": [
+    "slim",
+    "standard",
+    "chubby"
+  ],
+  "actions": [
+    "idle",
+    "happy",
+    "sad",
+    "sick",
+    "crouch",
+    "look_left",
+    "look_right"
+  ],
+  "clips": {
+    "slim": {
+      "idle": {
+        "file": "slim/idle.mp4",
+        "bytes": 19975,
+        "sha256": "c911c0ab6e44bb60ed4a2b1e27f945d57a4793155bfe7aa52060b96236dffa40"
+      },
+      "happy": {
+        "file": "slim/happy.mp4",
+        "bytes": 32540,
+        "sha256": "1d203ceafb12c8cc94cea40c5818b7489c2bd68eee29bf85d9e37edef1155877"
+      },
+      "sad": {
+        "file": "slim/sad.mp4",
+        "bytes": 19006,
+        "sha256": "fa762e6dab4c004393f48d8476ebf3035b19642a3bdc3def4f62eef0b05de5e4"
+      },
+      "sick": {
+        "file": "slim/sick.mp4",
+        "bytes": 32513,
+        "sha256": "24077cb489915351a7434c89d90cdb28076707a928e09d13e2ee1cabe72a0547"
+      },
+      "crouch": {
+        "file": "slim/crouch.mp4",
+        "bytes": 19334,
+        "sha256": "158a902c6bcab0d2f62276150fa4a161b651ed66049389f730a7c316424b6ab8"
+      },
+      "look_left": {
+        "file": "slim/look_left.mp4",
+        "bytes": 18059,
+        "sha256": "15ee97ca9d2e684c1806ed72c7b6840298ac286c59f33724e67b73271dfe2dbc"
+      },
+      "look_right": {
+        "file": "slim/look_right.mp4",
+        "bytes": 17409,
+        "sha256": "d03a9f6da8d71db7392177ebd01c6d6b4905771adc102ac63b2b74eb15ce5d88"
+      }
+    },
+    "standard": {
+      "idle": {
+        "file": "standard/idle.mp4",
+        "bytes": 23520,
+        "sha256": "28c2981092e7f430e3dc86897beba2f30c676181923645b37ed07166244274de"
+      },
+      "happy": {
+        "file": "standard/happy.mp4",
+        "bytes": 36773,
+        "sha256": "69cb3c9b6d171dfb936229b79b780e9268ff10defd5b8d49ca01748c864db83e"
+      },
+      "sad": {
+        "file": "standard/sad.mp4",
+        "bytes": 21546,
+        "sha256": "1cb9514956cd030cf06d26eb72e2977ce6d313586e5d65d8ce51a92f1d56d0ba"
+      },
+      "sick": {
+        "file": "standard/sick.mp4",
+        "bytes": 37700,
+        "sha256": "6e49980f107284aeccd5f2003ffea946134e11b7a2c05b3e288c5650b94d0557"
+      },
+      "crouch": {
+        "file": "standard/crouch.mp4",
+        "bytes": 22760,
+        "sha256": "775d36ba7b9fb7174e9c8610dec63d7126a863b2b618bdcac8b69b7e0d6118da"
+      },
+      "look_left": {
+        "file": "standard/look_left.mp4",
+        "bytes": 20474,
+        "sha256": "f18e8ddb5e6bfa045c3fe0b9e7e640014d827040e7476a5e6fac0226b1c8064c"
+      },
+      "look_right": {
+        "file": "standard/look_right.mp4",
+        "bytes": 20707,
+        "sha256": "83c2e2a091c46641d838d1d91df3325686a1a3bb6d2bf60e1b5182f8646445ab"
+      }
+    },
+    "chubby": {
+      "idle": {
+        "file": "chubby/idle.mp4",
+        "bytes": 28724,
+        "sha256": "8c3d11418a537e3ef6f7ccebed742b2dc29e0ec5315b029ceb26fbd3108552ff"
+      },
+      "happy": {
+        "file": "chubby/happy.mp4",
+        "bytes": 44614,
+        "sha256": "d4b71d7a2fb8f5cc2a258af701eca6b408dd872f56bbb33e5b018ccfa9952c84"
+      },
+      "sad": {
+        "file": "chubby/sad.mp4",
+        "bytes": 26299,
+        "sha256": "7a500a5e1e5f3094606da04247d1b0c3067760f559a673104f5ec2d7cf7b4158"
+      },
+      "sick": {
+        "file": "chubby/sick.mp4",
+        "bytes": 44202,
+        "sha256": "505c13521d1173353398cb212b31b78077db432e25bcc925ddd7214b521f6b33"
+      },
+      "crouch": {
+        "file": "chubby/crouch.mp4",
+        "bytes": 27858,
+        "sha256": "c1ff66477cf642b7535e68e300fe804c827e0047a085316a05290439eead15bd"
+      },
+      "look_left": {
+        "file": "chubby/look_left.mp4",
+        "bytes": 24131,
+        "sha256": "4f35e1c7386837a69fa027463d01b649101204a220f3d1f7b1c9390a8c9bf92f"
+      },
+      "look_right": {
+        "file": "chubby/look_right.mp4",
+        "bytes": 24762,
+        "sha256": "6fa654f4a1587eb8a29e897c568f9e185f2b968e2892495f5ac0c8cb8f76e51d"
+      }
+    }
+  }
+}

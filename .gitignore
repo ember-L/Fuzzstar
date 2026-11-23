@@ -1,0 +1,14 @@
+.codegraph/
+视觉参考/
+*.png
+.DS_Store
+.superpowers/
+backend/.venv*/
+backend/*.db
+# 本地环境变量（模板见 backend/.env.example）
+backend/.env
+.env
+.impeccable/
+# 本地生成的萌宠动图资产：体积大不入库，由离线流程产出并落对象存储
+backend/assets/motion/
+backend/tmp_out/

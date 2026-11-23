@@ -1,0 +1,167 @@
+import { fetch as sendUpload } from 'expo/fetch';
+import { File } from 'expo-file-system';
+import { launchImageLibraryAsync } from 'expo-image-picker';
+import { useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { api } from '../lib/api';
+import type { PlaceholderManifest } from '../lib/avatar';
+import { PhotoUploadError, uploadPhoto } from '../lib/photo-upload';
+import { QUOTA_EXHAUSTED_HINT } from '../lib/quota';
+import { ApiError } from '../lib/session';
+import { colors } from '../theme';
+import type { Submission } from './AvatarStage';
+
+export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false, endpoint = 'avatar' }: {
+  pet: { id: number; name: string };
+  onSubmitted?: (submission: Submission) => void;
+  quotaExhausted?: boolean;
+  endpoint?: 'avatar' | 'motion';
+}) {
+  const [photo, setPhoto] = useState<{ file: Blob; name: string }>();
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [lastMediaId, setLastMediaId] = useState<string>();
+  const operation = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    operation.current?.abort();
+    operation.current = null;
+  }, []);
+
+  async function pick() {
+    if (operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setBusy(true);
+    try {
+      const result = await launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (Platform.OS === 'web') URL.revokeObjectURL(asset.uri);
+      if (controller.signal.aborted) return;
+      const file = asset.file ?? new File(asset.uri);
+      setPhoto({ file, name: asset.fileName || '已选照片' });
+      setMessage('');
+    } catch {
+      if (!controller.signal.aborted) {
+        setPhoto(undefined);
+        setMessage('无法读取照片，请重新选择 JPG、PNG 或 HEIC 文件。');
+      }
+    } finally {
+      if (operation.current === controller) {
+        operation.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function submitAvatar(mediaId: string, signal: AbortSignal) {
+    const submitted = await api.authorized<{ task_id: string; status: string; placeholder_manifest: PlaceholderManifest }>(`/pets/${pet.id}/avatar`, {
+      method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ media_id: mediaId }),
+    });
+    if (!/^[0-9a-f]{32}$/.test(submitted?.task_id ?? '')) throw new PhotoUploadError('未获得有效的生成任务。');
+    setLastMediaId(mediaId);
+    onSubmitted?.({ taskId: submitted.task_id, placeholder: submitted.placeholder_manifest });
+  }
+
+  // F14-1：动图通道为主路径；配置缺失或路由未部署时回退分身生成，已上传的照片不浪费。
+  async function submitGeneration(mediaId: string, signal: AbortSignal) {
+    if (endpoint !== 'motion') return submitAvatar(mediaId, signal);
+    try {
+      const submitted = await api.authorized<{ task_id: string; status: string }>(`/pets/${pet.id}/motion`, {
+        method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ media_id: mediaId }),
+      });
+      if (!/^[0-9a-f]{32}$/.test(submitted?.task_id ?? '')) throw new PhotoUploadError('未获得有效的生成任务。');
+      setLastMediaId(mediaId);
+      onSubmitted?.({ taskId: submitted.task_id });
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 405 || error.status === 503)) {
+        return submitAvatar(mediaId, signal);
+      }
+      throw error;
+    }
+  }
+
+  async function submit() {
+    if (!photo || operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setBusy(true);
+    setMessage('正在上传并验证照片…');
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 60_000);
+    try {
+      const mediaId = await uploadPhoto(pet.id, photo.file, api.authorized, sendUpload, controller.signal);
+      setPhoto(undefined);
+      setMessage(endpoint === 'motion' ? '照片已验证，正在提交萌宠动图生成…' : '照片已验证，正在提交分身生成…');
+      await submitGeneration(mediaId, controller.signal);
+      setMessage('');
+    } catch (error) {
+      if (operation.current !== controller) return;
+      if (timedOut) setMessage('上传或提交超时，请重试。');
+      else setMessage(error instanceof ApiError || error instanceof PhotoUploadError ? error.message : '无法上传照片，请重试。');
+    } finally {
+      clearTimeout(timer);
+      if (operation.current === controller) {
+        operation.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function retry() {
+    if (!lastMediaId || operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setBusy(true);
+    try {
+      await submitGeneration(lastMediaId, controller.signal);
+      setMessage('');
+    } catch (error) {
+      if (operation.current === controller) {
+        setMessage(error instanceof ApiError ? error.message : '重试提交失败，请稍后再试。');
+      }
+    } finally {
+      if (operation.current === controller) {
+        operation.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  const canRetry = Boolean(lastMediaId) && !busy && !quotaExhausted;
+  const submitDisabled = busy || quotaExhausted;
+
+  return (
+    <View style={styles.card}>
+      <Text accessibilityRole="header" style={styles.title}>给{pet.name}上传照片</Text>
+      <Text style={styles.note}>JPG、PNG 或 HEIC，单张不超过 10 MiB。验证通过后自动生成一整套萌化动作动图。</Text>
+      {photo ? <Text style={styles.note}>待上传：{photo.name}</Text> : null}
+      <View style={styles.actions}>
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
+          onPress={pick} style={[styles.button, busy && styles.disabled]}>
+          <Text style={styles.title}>{photo ? '重新选择' : '选择照片'}</Text>
+        </Pressable>
+        {photo ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitDisabled }} disabled={submitDisabled}
+          onPress={submit} style={[styles.button, styles.primary, submitDisabled && styles.disabled]}>
+          <Text style={styles.title}>确认上传</Text>
+        </Pressable> : null}
+        {canRetry ? <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy }} disabled={busy}
+          onPress={retry} style={[styles.button, busy && styles.disabled]}>
+          <Text style={styles.title}>重试生成</Text>
+        </Pressable> : null}
+      </View>
+      {quotaExhausted ? <Text style={styles.note}>{QUOTA_EXHAUSTED_HINT}</Text> : null}
+      {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: { padding: 20, borderRadius: 20, backgroundColor: colors.surface, gap: 8 },
+  title: { fontSize: 15, fontWeight: '600', color: colors.onBrand },
+  note: { fontSize: 13, lineHeight: 20, color: colors.secondary },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  button: { minHeight: 44, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 12, backgroundColor: colors.soft },
+  primary: { backgroundColor: colors.brand },
+  disabled: { opacity: 0.6 },
+});
