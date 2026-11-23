@@ -2,9 +2,10 @@ import base64
 import io
 import os
 import runpy
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 from PIL import Image
@@ -18,6 +19,10 @@ class StudioTest(unittest.TestCase):
                                              'WAN_IMAGE_MODEL': 'test-wan-image'}, clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        os.environ['WAN_STUDIO_STATE_DIR'] = state.name
+        self.state = state.name
         self.client = create_app().test_client()
         self.headers = {'X-Studio-Request': '1'}
 
@@ -37,13 +42,25 @@ class StudioTest(unittest.TestCase):
             self.assertIn(f'value="{action}"', html)
         self.assertIn('Wan 3.0', html)
         self.assertIn('3 秒', html)
+        self.assertIn('id="download"', html)
+        self.assertIn('下载 MP4', html)
         self.assertNotIn('test-key', html)
 
+    @staticmethod
+    def video_stream(payload=b'fake-mp4', status=200, content_type='video/mp4'):
+        stream = MagicMock()
+        stream.__enter__.return_value = httpx.Response(
+            status, headers={'Content-Type': content_type}, content=payload)
+        return stream
+
+    @patch('app.httpx.stream')
     @patch('app.httpx.request')
-    def test_wan3_submit_poll_and_result(self, send):
+    def test_wan3_submit_poll_and_result(self, send, stream):
+        stream.side_effect = [self.video_stream()]
         send.side_effect = [
             httpx.Response(200, json={'output': {'task_id': 'task-1', 'task_status': 'PENDING'}}),
             httpx.Response(200, json={'output': {'task_status': 'RUNNING'}}),
+            httpx.Response(200, json={'output': {'task_status': 'SUCCEEDED', 'video_url': 'https://example.com/pet.mp4'}}),
             httpx.Response(200, json={'output': {'task_status': 'SUCCEEDED', 'video_url': 'https://example.com/pet.mp4'}}),
         ]
         photo = self.photo()
@@ -64,8 +81,51 @@ class StudioTest(unittest.TestCase):
         self.assertEqual(payload['parameters']['resolution'], '720P')
         path = '/api/jobs/' + result.json['token']
         self.assertEqual(self.client.get(path).json, {'status': 'RUNNING'})
-        self.assertEqual(self.client.get(path).json, {'status': 'SUCCEEDED', 'video_url': 'https://example.com/pet.mp4'})
+        done = self.client.get(path).json
+        self.assertEqual(done['status'], 'SUCCEEDED')
+        self.assertEqual(done['video_url'], path + '/video')
+        self.assertEqual(done['download_url'], path + '/video?download=1')
         self.assertEqual(send.call_args.args, ('GET', 'https://token-plan.maas.qianwenaiapi.com/api/v1/tasks/task-1'))
+        self.assertEqual(stream.call_args.args, ('GET', 'https://example.com/pet.mp4'))
+        played = self.client.get(done['video_url'])
+        self.assertEqual(played.status_code, 200)
+        self.assertEqual(played.data, b'fake-mp4')
+        self.assertEqual(played.mimetype, 'video/mp4')
+        self.assertIn('private', played.headers['Cache-Control'])
+        saved = self.client.get(done['download_url'])
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn('attachment', saved.headers['Content-Disposition'])
+        self.assertIn('.mp4', saved.headers['Content-Disposition'])
+        self.assertEqual(self.client.get(path).json['video_url'], path + '/video')
+        self.assertEqual(stream.call_count, 1)
+
+    @patch('app.httpx.stream')
+    @patch('app.httpx.request')
+    def test_video_falls_back_to_upstream_when_caching_fails(self, send, stream):
+        send.side_effect = [
+            httpx.Response(200, json={'output': {'task_id': 'task-2', 'task_status': 'PENDING'}}),
+            httpx.Response(200, json={'output': {'task_status': 'SUCCEEDED', 'video_url': 'https://example.com/pet.mp4'}}),
+        ]
+        stream.side_effect = httpx.ConnectError('offline')
+        token = self.submit(self.photo()).json['token']
+        done = self.client.get('/api/jobs/' + token).json
+        self.assertEqual(done['video_url'], 'https://example.com/pet.mp4')
+        self.assertEqual(done['download_url'], 'https://example.com/pet.mp4')
+        self.assertEqual(self.client.get('/api/jobs/' + token + '/video').status_code, 404)
+
+    def test_video_route_rejects_unsigned_and_missing_tokens(self):
+        self.assertEqual(self.client.get('/api/jobs/not-a-token/video').status_code, 404)
+        result = create_app().test_client()
+        self.assertEqual(result.get('/api/jobs/' + 'x' * 40 + '/video').status_code, 404)
+
+    @patch('app.httpx.request', return_value=httpx.Response(200, json={'output': {'task_id': 'task-3', 'task_status': 'RUNNING'}}))
+    def test_job_token_survives_restart(self, send):
+        token = self.submit(self.photo()).json['token']
+        restarted = create_app().test_client()
+        self.assertEqual(restarted.get('/api/jobs/' + token).json, {'status': 'RUNNING'})
+
+    def test_video_cache_requires_video_content_type(self):
+        self.assertFalse(os.path.exists(os.path.join(self.state, 'videos', 'task-4.mp4')))
 
     @patch('app.httpx.request', return_value=httpx.Response(200, json={'output': {'task_id': 'task-1', 'task_status': 'PENDING'}}))
     def test_token_plan_compatible_base_uses_native_video_path(self, send):
@@ -283,6 +343,10 @@ class StudioTest(unittest.TestCase):
         self.assertIn('id="image" name="image"', html)
         self.assertIn('id="portrait-accept"', html)
         self.assertIn('id="portrait-confirm"', html)
+        self.assertIn('id="download-portrait"', html)
+        self.assertIn('id="progress"', html)
+        self.assertIn('下载图片', html)
+        self.assertIn('state/images/', html)
         self.assertIn('data-portrait-ready="true"', html)
         self.assertTrue(html.index('上传照片') < html.index('生成 2.5D 形象') < html.index('选择动作'))
 
@@ -321,6 +385,29 @@ class StudioTest(unittest.TestCase):
         result = self.portrait()
         self.assertEqual(result.status_code, 504)
         self.assertIn('请勿连续重复提交', result.json['detail'])
+
+    @patch('app.httpx.get')
+    @patch('app.httpx.request')
+    def test_portrait_is_saved_and_downloadable(self, send, download):
+        send.return_value = httpx.Response(200, json=self.PORTRAIT_OK)
+        download.return_value = httpx.Response(200, content=self.photo(), headers={'Content-Type': 'image/png'})
+        result = self.portrait()
+        self.assertEqual(result.status_code, 200)
+        data = result.json
+        self.assertRegex(data['image_id'], r'^[0-9a-f]{24}$')
+        saved = os.path.join(self.state, 'images', data['image_id'] + '.png')
+        self.assertTrue(os.path.isfile(saved))
+        with Image.open(saved) as made:
+            self.assertEqual(made.size, (480, 480))
+        viewed = self.client.get(data['view_url'])
+        self.assertEqual(viewed.status_code, 200)
+        self.assertEqual(viewed.mimetype, 'image/png')
+        self.assertIn('private', viewed.headers['Cache-Control'])
+        downloaded = self.client.get(data['download_url'])
+        self.assertEqual(downloaded.status_code, 200)
+        self.assertIn('attachment', downloaded.headers['Content-Disposition'])
+        self.assertEqual(self.client.get('/api/portraits/' + '0' * 24 + '/image').status_code, 404)
+        self.assertEqual(self.client.get('/api/portraits/NOTHEX/image').status_code, 404)
 
 
 if __name__ == '__main__':

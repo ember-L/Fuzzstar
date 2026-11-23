@@ -15,6 +15,8 @@ const busyText = byId('busy-text');
 const confirmBar = byId('portrait-confirm');
 const acceptBtn = byId('portrait-accept');
 const retryBtn = byId('portrait-retry');
+const downloadLink = byId('download');
+const portraitDownload = byId('download-portrait');
 const ready = form.dataset.ready === 'true';
 const portraitReady = form.dataset.portraitReady === 'true';
 const storageKey = 'rongxing-wan-active-job';
@@ -41,9 +43,35 @@ function setBadge(id, text, tone = '') {
   badge.classList.toggle('is-busy', tone === 'busy');
 }
 
+let timer = null;
+let startedAt = 0;
+let phase = '';
+
+function tickTimer() {
+  const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  byId('progress-text').textContent = phase + ' · 已用时 ' + seconds + ' 秒';
+}
+
+function trackProgress(text) {
+  phase = text;
+  if (!timer) {
+    startedAt = Date.now();
+    byId('progress').hidden = false;
+    timer = setInterval(tickTimer, 1000);
+  }
+  tickTimer();
+}
+
+function stopTimer() {
+  if (timer) clearInterval(timer);
+  timer = null;
+  byId('progress').hidden = true;
+}
+
 function setBusy(on, text) {
   busyBox.hidden = !on;
   if (text) busyText.textContent = text;
+  if (!on) stopTimer();
 }
 
 function syncGate() {
@@ -77,19 +105,28 @@ function dropPortrait() {
   accepted = false;
   confirmBar.hidden = true;
   acceptBtn.hidden = false;
+  portraitDownload.hidden = true;
+  portraitDownload.removeAttribute('href');
   if (portraitUrl) URL.revokeObjectURL(portraitUrl);
   portraitUrl = null;
   portraitBlob = null;
   setBadge('portrait-state', '未生成');
 }
 
-function showPhotoPreview() {
+function clearResult() {
   if (video.hasAttribute('src')) {
     video.removeAttribute('src');
     video.load();
   }
-  video.hidden = byId('result').hidden = byId('save-tip').hidden = true;
+  video.removeAttribute('poster');
+  video.hidden = byId('result').hidden = downloadLink.hidden = byId('save-tip').hidden = true;
+  downloadLink.removeAttribute('href');
+  downloadLink.removeAttribute('download');
   byId('result').removeAttribute('href');
+}
+
+function showPhotoPreview() {
+  clearResult();
   if (photoUrl) {
     still.src = photoUrl;
     still.hidden = false;
@@ -167,9 +204,11 @@ async function generatePortrait() {
     return;
   }
   portraitBusy = true;
+  clearResult();
   dropPortrait();
   syncGate();
   setBusy(true, '正在重绘形象，约 20–60 秒…');
+  trackProgress('形象生成中');
   setBadge('portrait-state', '生成中', 'busy');
   setStatus('正在按系统提示词生成 2.5D 形象，请勿关闭页面…');
   try {
@@ -187,13 +226,15 @@ async function generatePortrait() {
     still.src = portraitUrl;
     still.hidden = false;
     empty.hidden = true;
-    video.hidden = true;
+    clearResult();
+    portraitDownload.href = data.download_url || '';
+    portraitDownload.hidden = !data.download_url;
     byId('preview-type').textContent = '形象 · 待确认';
     byId('portrait-note').textContent = '这张形象满意吗？确认后用它生成动作视频。';
     acceptBtn.hidden = false;
     confirmBar.hidden = false;
     setBadge('portrait-state', '待确认', 'busy');
-    setStatus('形象已生成，确认后即可生成动作视频。');
+    setStatus('形象已生成并自动存到本机，确认后即可生成动作视频。');
   } catch (error) {
     setBadge('portrait-state', '生成失败');
     setStatus(error.status ? error.message : '生成形象失败，请稍后再试。', true);
@@ -225,7 +266,7 @@ acceptBtn.addEventListener('click', () => {
   still.src = portraitUrl;
   still.hidden = false;
   empty.hidden = true;
-  video.hidden = true;
+  clearResult();
   byId('preview-type').textContent = '已确认形象';
   byId('portrait-note').textContent = '已使用这张形象生成视频；想换可以点「重新生成」。';
   acceptBtn.hidden = true;
@@ -260,18 +301,33 @@ function finish() {
 
 async function poll() {
   byId('resume').hidden = true;
+  trackProgress('等待受理');
   let errors = 0;
   for (;;) {
     try {
       const data = await call('./api/jobs/' + encodeURIComponent(job.token));
       errors = 0;
       if (data.status === 'SUCCEEDED') {
-        byId('result').href = video.src = data.video_url;
+        const source = data.video_url;
+        const savedAs = data.download_url || source;
+        const local = savedAs.startsWith('/api/');
+        if (still.getAttribute('src')) video.poster = still.src;
+        video.src = source;
+        video.load();
         still.hidden = empty.hidden = true;
-        video.hidden = byId('result').hidden = byId('save-tip').hidden = false;
+        video.hidden = false;
+        downloadLink.href = savedAs;
+        downloadLink.textContent = local ? '下载 MP4' : '打开 MP4 ↗';
+        if (local) downloadLink.setAttribute('download', '绒星-宠物动作.mp4');
+        else downloadLink.removeAttribute('download');
+        downloadLink.hidden = byId('save-tip').hidden = false;
+        byId('result').href = source;
+        byId('result').hidden = false;
         byId('preview-type').textContent = '成片 · MP4';
         setBadge('action-state', '已完成', 'done');
-        setStatus(job.action + ' · 已完成，请及时保存');
+        setStatus(job.action + ' · 已生成并缓存在本机，点「下载 MP4」保存');
+        const playing = video.play();
+        if (playing && playing.catch) playing.catch(() => { /* 浏览器可能拦截带声音的自动播放 */ });
         finish();
         return;
       }
@@ -281,8 +337,9 @@ async function poll() {
         finish();
         return;
       }
+      trackProgress(data.status === 'PENDING' ? '排队中' : '生成中');
       const stageText = data.status === 'PENDING' ? '任务排队中…' : '正在生成视频…';
-      setBusy(true, stageText + '通常需要几分钟');
+      setBusy(true, stageText + '通常需要 1–3 分钟');
       setBadge('action-state', data.status === 'PENDING' ? '排队中' : '生成中', 'busy');
       setStatus((data.status === 'PENDING' ? '排队中' : '生成中') + '，通常需要几分钟');
     } catch (error) {
@@ -318,14 +375,20 @@ form.addEventListener('submit', async (event) => {
     return;
   }
   const selected = form.querySelector('input[name="action"]:checked');
+  if (!selected) {
+    setStatus('请选择一个动作。', true);
+    return;
+  }
   const action = selected.labels[0].textContent.trim();
+  // 先构建请求体再禁用 fieldset，否则 action 与图片会被排除，服务端返回 400。
+  const body = new FormData(form);
+  body.set('action', selected.value);
   submitting = true;
   lock(true);
   byId('task').hidden = true;
   setBusy(true, '正在上传并提交…');
   setStatus('正在上传并提交任务…');
   try {
-    const body = new FormData(form);
     const data = await call('./api/jobs', { method: 'POST', headers: { 'X-Studio-Request': '1' }, body });
     if (!data.token || !data.task_id) throw new Error('未收到任务编号。');
     remember({ token: data.token, id: data.task_id, action });
@@ -342,7 +405,7 @@ form.addEventListener('submit', async (event) => {
 byId('resume').addEventListener('click', () => void poll());
 
 video.addEventListener('error', () => {
-  if (!video.hidden) setStatus('无法在网页内播放，请打开 MP4，或检查链接是否过期。', true);
+  if (!video.hidden) setStatus('网页内暂时无法播放，请点「下载 MP4」保存到本地后用播放器查看。', true);
 });
 
 window.addEventListener('beforeunload', (event) => {

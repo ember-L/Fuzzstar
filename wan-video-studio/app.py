@@ -4,11 +4,12 @@ import io
 import os
 import re
 import secrets
+import time
 from urllib.parse import urlsplit
 
 import httpx
 from dotenv import load_dotenv
-from flask import Flask, abort, render_template, request
+from flask import Flask, abort, render_template, request, send_file
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from PIL import Image, UnidentifiedImageError
 from werkzeug.exceptions import HTTPException
@@ -57,9 +58,11 @@ PORTRAIT_NEGATIVE = '写实毛发，写实渲染，纯 2D 平涂，扁平贴纸�
 PORTRAIT_RENDER_SIZE = '1024*1024'
 PORTRAIT_SIZE = 480
 MAX_DESCRIPTION = 200
+MAX_VIDEO = 200 * 1024 * 1024
+VIDEO_TTL = 30 * 86400
 
 
-def create_app():
+def create_app(state_dir=None):
     app = Flask(__name__)
     host = os.getenv('WAN_STUDIO_HOST', '').strip()
     password = os.getenv('WAN_STUDIO_PASSWORD', '')
@@ -77,8 +80,40 @@ def create_app():
     portrait_ready = bool(api_key and image_model)
     app.config.update(TRUSTED_HOSTS=['127.0.0.1', 'localhost', '[::1]'] + ([host] if host else []),
                       MAX_CONTENT_LENGTH=MAX_IMAGE + 64 * 1024, MAX_FORM_PARTS=4)
-    # shortcut: tokens expire on restart with the random key, set a persistent key for deployment.
-    signer = URLSafeTimedSerializer(os.getenv('WAN_STUDIO_SECRET_KEY') or secrets.token_hex(32), salt='wan-video-job')
+    state_dir = state_dir or os.getenv('WAN_STUDIO_STATE_DIR', '').strip() or os.path.join(app.root_path, 'state')
+    videos = os.path.join(state_dir, 'videos')
+    images = os.path.join(state_dir, 'images')
+    os.makedirs(videos, exist_ok=True)
+    os.makedirs(images, exist_ok=True)
+    cutoff = time.time() - VIDEO_TTL
+    for folder in (videos, images):
+        for name in os.listdir(folder):
+            stale = os.path.join(folder, name)
+            try:
+                if os.path.isfile(stale) and os.path.getmtime(stale) < cutoff:
+                    os.remove(stale)
+            except OSError:
+                pass
+    # 签名密钥落盘：重启后旧任务链接仍可查询、已缓存的视频仍能播放和下载。
+    secret = os.getenv('WAN_STUDIO_SECRET_KEY', '').strip()
+    if not secret:
+        secret_path = os.path.join(state_dir, 'secret_key')
+        try:
+            with open(secret_path, encoding='utf-8') as saved:
+                secret = saved.read().strip()
+        except OSError:
+            secret = ''
+        if not secret:
+            secret = secrets.token_hex(32)
+            try:
+                fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                with open(secret_path, encoding='utf-8') as saved:
+                    secret = saved.read().strip()
+            else:
+                with os.fdopen(fd, 'w', encoding='utf-8') as saved:
+                    saved.write(secret)
+    signer = URLSafeTimedSerializer(secret, salt='wan-video-job')
 
     @app.before_request
     def authenticate():
@@ -93,7 +128,9 @@ def create_app():
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Content-Security-Policy'] = ("default-src 'self'; img-src 'self' blob:; media-src https:; "
+        if request.endpoint in ('video', 'portrait_image'):
+            response.headers['Cache-Control'] = 'private, max-age=3600'
+        response.headers['Content-Security-Policy'] = ("default-src 'self'; img-src 'self' blob:; media-src 'self' https:; "
                                                        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         return response
 
@@ -132,6 +169,34 @@ def create_app():
                 detail += '。任务可能已受理；不要立即重复提交，请先到百炼控制台核对。'
             abort(502, detail)
         return data['output']
+
+    def cache_video(task_id, url):
+        """把成片保存到本地，返回路径；失败返回 None（页面回退到上游临时链接）。"""
+        if not safe_label(task_id):
+            return None
+        path = os.path.join(videos, task_id + '.mp4')
+        if os.path.isfile(path) and os.path.getsize(path) > 0:
+            return path
+        part = path + '.part'
+        try:
+            with httpx.stream('GET', url, timeout=120, follow_redirects=False) as response:
+                if response.status_code != 200 or not response.headers.get('Content-Type', '').startswith('video/'):
+                    return None
+                total = 0
+                with open(part, 'wb') as output:
+                    for chunk in response.iter_bytes():
+                        total += len(chunk)
+                        if total > MAX_VIDEO:
+                            raise ValueError('视频超过 200 MB')
+                        output.write(chunk)
+            os.replace(part, path)
+        except (httpx.RequestError, OSError, ValueError):
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+            return None
+        return path
 
     @app.get('/')
     def index():
@@ -216,7 +281,22 @@ def create_app():
         if not photo:
             abort(502, '生成的图片无法作为首帧使用，请重新生成。')
         mime = 'image/png'
-        return {'image': f'data:{mime};base64,' + base64.b64encode(photo).decode('ascii'), 'mime': mime}
+        image_id = secrets.token_hex(12)
+        with open(os.path.join(images, image_id + '.png'), 'wb') as saved:
+            saved.write(photo)
+        return {'image': f'data:{mime};base64,' + base64.b64encode(photo).decode('ascii'), 'mime': mime,
+                'image_id': image_id, 'view_url': f'/api/portraits/{image_id}/image',
+                'download_url': f'/api/portraits/{image_id}/image?download=1'}
+
+    @app.get('/api/portraits/<image_id>/image')
+    def portrait_image(image_id):
+        if not re.fullmatch(r'[0-9a-f]{24}', image_id):
+            abort(404)
+        path = os.path.join(images, image_id + '.png')
+        if not os.path.isfile(path):
+            abort(404)
+        return send_file(path, mimetype='image/png', as_attachment=request.args.get('download') == '1',
+                         download_name='绒星-宠物形象.png', conditional=True, max_age=0)
 
     @app.get('/api/jobs/<token>')
     def poll(token):
@@ -231,13 +311,30 @@ def create_app():
         if status == 'SUCCEEDED':
             url = https_url(result.get('video_url'))
             if url:
-                return {'status': status, 'video_url': url}
+                if cache_video(task_id, url):
+                    local = f'/api/jobs/{token}/video'
+                    return {'status': status, 'video_url': local, 'download_url': local + '?download=1'}
+                return {'status': status, 'video_url': url, 'download_url': url}
             abort(502, '任务已完成，但百炼未返回有效视频链接。')
         if status in ('FAILED', 'CANCELED', 'UNKNOWN'):
             detail = {'FAILED': '视频生成失败', 'CANCELED': '任务已取消', 'UNKNOWN': '任务不存在或已过期'}[status]
             code = error_code(result)
             return {'status': status, 'detail': detail + (f'（{code}）' if code else '') + '。'}
         abort(502, '百炼返回了未识别的任务状态，可稍后继续查询。')
+
+    @app.get('/api/jobs/<token>/video')
+    def video(token):
+        try:
+            task_id = signer.loads(token, max_age=VIDEO_TTL)
+        except BadSignature:
+            abort(404)
+        if not safe_label(task_id):
+            abort(404)
+        path = os.path.join(videos, task_id + '.mp4')
+        if not os.path.isfile(path):
+            abort(404)
+        return send_file(path, mimetype='video/mp4', as_attachment=request.args.get('download') == '1',
+                         download_name=f'绒星-宠物动作-{task_id[:8]}.mp4', conditional=True, max_age=0)
 
     return app
 
