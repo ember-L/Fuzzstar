@@ -1,14 +1,34 @@
 """T17 F12-4: account deletion with 15-day grace and physical purge (PIPL)."""
+
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.models import (AiUsageLog, AuthSession, ChatMessage, ChatSession, Consent, DeletionJob,
-                        DietRecord, HealthEvent, HealthScreening, MediaUpload, Pet, RefreshToken,
-                        RequestIdempotency, ScreeningMedia, ScreeningSymptom, Task, UsageCounter,
-                        User, UserCredential, VerificationMail, WeightRecord)
+from app.models import (
+    AiUsageLog,
+    AuthSession,
+    ChatMessage,
+    ChatSession,
+    Consent,
+    DeletionJob,
+    DietRecord,
+    HealthEvent,
+    HealthScreening,
+    MediaUpload,
+    Pet,
+    RefreshToken,
+    RequestIdempotency,
+    ScreeningMedia,
+    ScreeningSymptom,
+    Task,
+    UsageCounter,
+    User,
+    UserCredential,
+    VerificationMail,
+    WeightRecord,
+)
 
 PURGE_DELAY = timedelta(days=15)
 
@@ -22,8 +42,11 @@ def request_deletion(db: Session, user_id: int, *, now: datetime) -> tuple[Delet
     db.add(job)
     user = db.get(User, user_id)
     user.status = 'deletion_pending'
-    db.execute(update(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
-               .values(revoked_at=now))
+    db.execute(
+        update(AuthSession)
+        .where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
     db.flush()
     return job, True
 
@@ -35,9 +58,13 @@ def _delete_oss_objects(db: Session, user_id: int, storage) -> None:
         if media.version_id is not None:
             kwargs['VersionId'] = media.version_id
         storage.client.delete_object(**kwargs)
-    tasks = db.scalars(select(Task).where(Task.pet_id.in_(pet_ids),
-                                          Task.type.in_(['avatar_batch', 'gif_export', 'motion_batch']),
-                                          Task.result.is_not(None))).all()
+    tasks = db.scalars(
+        select(Task).where(
+            Task.pet_id.in_(pet_ids),
+            Task.type.in_(['avatar_batch', 'gif_export', 'motion_batch']),
+            Task.result.is_not(None),
+        )
+    ).all()
     for task in tasks:
         result = task.result or {}
         entries = []
@@ -80,8 +107,11 @@ def purge_user_data(db: Session, user_id: int, *, storage, now: datetime) -> boo
     db.execute(delete(DietRecord).where(DietRecord.pet_id.in_(pet_ids)))
     db.execute(delete(WeightRecord).where(WeightRecord.pet_id.in_(pet_ids)))
     # Audit keeps anonymous aggregates only (AC-12-4).
-    db.execute(update(AiUsageLog).where(or_(AiUsageLog.user_id == user_id, AiUsageLog.task_id.in_(task_ids)))
-               .values(user_id=None, task_id=None))
+    db.execute(
+        update(AiUsageLog)
+        .where(or_(AiUsageLog.user_id == user_id, AiUsageLog.task_id.in_(task_ids)))
+        .values(user_id=None, task_id=None)
+    )
     db.execute(delete(Task).where(Task.pet_id.in_(pet_ids)))
     db.execute(delete(MediaUpload).where(MediaUpload.pet_id.in_(pet_ids)))
     db.execute(delete(Pet).where(Pet.user_id == user_id))
@@ -103,8 +133,9 @@ def purge_user_data(db: Session, user_id: int, *, storage, now: datetime) -> boo
 def purge_due(engine: Engine, *, storage, now: datetime) -> list[int]:
     """Sweep due deletion jobs; each purge runs in its own transaction."""
     with Session(engine) as db:
-        due = db.scalars(select(DeletionJob.user_id).where(DeletionJob.status == 'pending',
-                                                           DeletionJob.purge_after <= now)).all()
+        due = db.scalars(
+            select(DeletionJob.user_id).where(DeletionJob.status == 'pending', DeletionJob.purge_after <= now)
+        ).all()
     purged = []
     for user_id in due:
         with Session(engine) as db, db.begin():

@@ -42,26 +42,48 @@ class PhotoStorage:
 
     @classmethod
     def from_env(cls):
-        endpoint, bucket, key, secret = (os.environ.get(f'MEDIA_S3_{name}', '').strip()
-                                         for name in ('ENDPOINT', 'BUCKET', 'ACCESS_KEY', 'SECRET_KEY'))
+        endpoint, bucket, key, secret = (
+            os.environ.get(f'MEDIA_S3_{name}', '').strip()
+            for name in ('ENDPOINT', 'BUCKET', 'ACCESS_KEY', 'SECRET_KEY')
+        )
         if not any((endpoint, bucket, key, secret)):
             return None
         parsed = urlsplit(endpoint)
-        if not all((bucket, key, secret, parsed.hostname)) or parsed.username is not None or parsed.query or parsed.fragment:
+        if (
+            not all((bucket, key, secret, parsed.hostname))
+            or parsed.username is not None
+            or parsed.query
+            or parsed.fragment
+        ):
             raise RuntimeError('Configure MEDIA_S3_ENDPOINT, BUCKET, ACCESS_KEY and SECRET_KEY together')
         if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost')):
             raise RuntimeError('Media storage requires HTTPS except on localhost')
-        client = boto3.client('s3', endpoint_url=endpoint, aws_access_key_id=key, aws_secret_access_key=secret,
-                              region_name=os.environ.get('MEDIA_S3_REGION', 'us-east-1'),
-                              config=Config(signature_version='s3v4', s3={'addressing_style': 'path'},
-                                            connect_timeout=3, read_timeout=10, retries={'total_max_attempts': 1}))
+        client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=key,
+            aws_secret_access_key=secret,
+            region_name=os.environ.get('MEDIA_S3_REGION', 'us-east-1'),
+            config=Config(
+                signature_version='s3v4',
+                s3={'addressing_style': 'path'},
+                connect_timeout=3,
+                read_timeout=10,
+                retries={'total_max_attempts': 1},
+            ),
+        )
         return cls(client, bucket)
 
     def presign(self, photo: MediaUpload) -> dict:
         try:
             return self.client.generate_presigned_post(
-                Bucket=self.bucket, Key=photo.object_key, Fields={'Content-Type': photo.content_type},
-                Conditions=[{'Content-Type': photo.content_type}, ['content-length-range', photo.size_bytes, photo.size_bytes]],
+                Bucket=self.bucket,
+                Key=photo.object_key,
+                Fields={'Content-Type': photo.content_type},
+                Conditions=[
+                    {'Content-Type': photo.content_type},
+                    ['content-length-range', photo.size_bytes, photo.size_bytes],
+                ],
                 ExpiresIn=UPLOAD_SECONDS,
             )
         except (BotoCoreError, ClientError) as exc:
@@ -69,18 +91,30 @@ class PhotoStorage:
 
     def download_url(self, photo: MediaUpload) -> str:
         try:
-            return self.client.generate_presigned_url('get_object', Params={
-                'Bucket': self.bucket, 'Key': photo.object_key, 'VersionId': photo.version_id,
-                'ResponseContentDisposition': 'attachment',
-            }, ExpiresIn=DOWNLOAD_SECONDS)
+            return self.client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': self.bucket,
+                    'Key': photo.object_key,
+                    'VersionId': photo.version_id,
+                    'ResponseContentDisposition': 'attachment',
+                },
+                ExpiresIn=DOWNLOAD_SECONDS,
+            )
         except (BotoCoreError, ClientError) as exc:
             raise storage_unavailable() from exc
 
     def asset_url(self, key: str, version_id: str) -> str:
         try:
-            return self.client.generate_presigned_url('get_object', Params={
-                'Bucket': self.bucket, 'Key': key, 'VersionId': version_id,
-            }, ExpiresIn=DOWNLOAD_SECONDS)
+            return self.client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': self.bucket,
+                    'Key': key,
+                    'VersionId': version_id,
+                },
+                ExpiresIn=DOWNLOAD_SECONDS,
+            )
         except (BotoCoreError, ClientError) as exc:
             raise storage_unavailable() from exc
 
@@ -124,8 +158,18 @@ def valid_video(data: bytes, content_type: str) -> bool:
         target.write_bytes(data)
         try:
             probe = subprocess.run(
-                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', str(target)],
-                capture_output=True, timeout=30,
+                [
+                    'ffprobe',
+                    '-v',
+                    'error',
+                    '-show_entries',
+                    'format=duration:stream=codec_type',
+                    '-of',
+                    'json',
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
             )
         except FileNotFoundError as exc:
             raise storage_unavailable() from exc
@@ -151,8 +195,18 @@ def valid_audio(data: bytes, content_type: str) -> bool:
         target.write_bytes(data)
         try:
             probe = subprocess.run(
-                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration:stream=codec_type', '-of', 'json', str(target)],
-                capture_output=True, timeout=30,
+                [
+                    'ffprobe',
+                    '-v',
+                    'error',
+                    '-show_entries',
+                    'format=duration:stream=codec_type',
+                    '-of',
+                    'json',
+                    str(target),
+                ],
+                capture_output=True,
+                timeout=30,
             )
         except FileNotFoundError as exc:
             raise storage_unavailable() from exc

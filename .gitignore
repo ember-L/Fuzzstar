@@ -1,19 +1,46 @@
+# ============ 系统与编辑器 ============
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+backend/.venv*/
+
+# ============ 环境变量与密钥（模板见 backend/.env.example，团队默认值见 backend/team.env）============
+.env
+backend/.env
+
+# ============ 数据库与临时产物 ============
+backend/*.db
+backend/.trial/
+backend/tmp_out/
+
+# ============ 图片与生成资产 ============
+# 全局排除图片，避免设计稿/截图入库；管理台 logo 单独放行
+*.png
+!backend/admin/assets/*.png
+# 萌宠动图资产体积大，由离线流程产出后落对象存储
+backend/assets/motion/
+
+# ============ 前端（Expo / React Native）============
+node_modules/
+.expo/
+dist/
+web-build/
+coverage/
+
+# ============ 本地私有 ============
 .codegraph/
 视觉参考/
-*.png
-.DS_Store
 .superpowers/
-backend/.venv*/
-backend/*.db
-# 本地环境变量（模板见 backend/.env.example）
-backend/.env
-.env
 .impeccable/
-# 本地生成的萌宠动图资产：体积大不入库，由离线流程产出并落对象存储
-backend/assets/motion/
-backend/tmp_out/
-# 管理台 logo 图片（覆盖全局 *.png 排除）
-!backend/admin/assets/*.png
 
-# 技能大赛逐字稿不上传
+# ============ 技能大赛逐字稿：本地保留，不上传 ============
 docs/*逐字稿.md

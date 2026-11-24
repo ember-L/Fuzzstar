@@ -264,6 +264,7 @@ feat(rules)!: 健康初筛规则包升到 v3
 | 改动范围 | 必跑 | 必须同步的文档 |
 | --- | --- | --- |
 | `backend/app/**` 业务逻辑 | `cd backend && python -m pytest -q` | 行为变化 → `docs/features.md` |
+| `backend/**` 任意 Python 改动 | `python -m ruff check .` + `python -m ruff format --check .`（首次 `pip install ruff`） | 无 |
 | `backend/migrations/**` | `pytest tests/test_migrations.py` + 真 MySQL `upgrade head` / `downgrade -1` 往返 | `docs/architecture.md` 数据模型 |
 | `backend/rules/*.yaml` | 升 `version` + `pytest tests/test_health.py tests/test_screening_worker.py` | `docs/product/FRD.md` 规则附录 |
 | 固定文案（免责声明 / 红线 / 错误码） | `pytest tests/test_copy_audit.py` | `docs/product/FRD.md` |
@@ -276,6 +277,28 @@ feat(rules)!: 健康初筛规则包升到 v3
 | 迁移、部署、Compose | `docker compose build` + 冒烟 | `docs/operations.md` |
 
 > 没有 CI 时，**把命令与关键输出贴进 PR 描述**；"我本地跑过了"不算证据。
+
+### 代码风格（backend，2026-11 起）
+
+风格由 `backend/pyproject.toml` 固化，不再口头约定：
+
+| 项 | 约定 | 执行方 |
+| --- | --- | --- |
+| Python 版本 | 3.11+，类型标注用 `X \| None` 而非 `Optional[X]` | `ruff`（UP 规则） |
+| 行宽 / 缩进 / 引号 | 120 列、4 空格、**单引号** | `ruff format` |
+| import 顺序 | 标准库 → 第三方 → 本项目 `app`（`known-first-party`） | `ruff`（I 规则） |
+| 未用变量 / import | 一律清除，不留注释掉的死代码 | `ruff`（F 规则） |
+| 中文注释与全角标点 | 允许，`E501`/`RUF001-003` 已关闭以免误报 | `pyproject.toml` |
+| 编辑器 | 缩进/换行/编码/末尾换行由根 `.editorconfig` + `.gitattributes` 统一 | 编辑器自动读取 |
+
+提交前统一执行（`--fix` 只做安全修复，`format` 只重排格式）：
+
+```sh
+cd backend
+python -m ruff check . --fix
+python -m ruff format .
+python -m pytest -q
+```
 
 ---
 

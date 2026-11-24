@@ -1,4 +1,5 @@
 """T17 F11 每日配额与只读权益（FRD F11-1/2/3，AC-11-1/2/3）。"""
+
 import unittest
 from datetime import timedelta
 from unittest.mock import patch
@@ -7,12 +8,12 @@ from uuid import uuid4
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
 from app.models import Base, MediaUpload, UsageCounter, User
 from app.providers.fake import FakeLLMProvider
 from app.services.quota import QuotaExceeded, consume_quota, quota_limits, quota_snapshot
-from test_auth_api import AuthAPIFixture
 
 
 def make_engine():
@@ -45,8 +46,9 @@ class QuotaLogicTests(unittest.TestCase):
             self.assertEqual(ctx.exception.limit, 10)
             db.rollback()
         with Session(self.engine) as db:
-            count = db.scalar(select(UsageCounter.count).where(UsageCounter.user_id == 1,
-                                                               UsageCounter.metric == 'screening'))
+            count = db.scalar(
+                select(UsageCounter.count).where(UsageCounter.user_id == 1, UsageCounter.metric == 'screening')
+            )
             self.assertEqual(count, 10)
 
     def test_consume_resets_on_new_day(self):
@@ -72,12 +74,15 @@ class QuotaLogicTests(unittest.TestCase):
 class QuotaFixture(AuthAPIFixture):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
-        self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
         self.pet_id = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).json()['id']
         self.app.state.chat_llm_provider = FakeLLMProvider(reply='{"reply": "喵～我在呢", "emotion": "happy"}')
-        self.session_id = self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions',
-                                           headers=self.headers).json()['session_id']
+        self.session_id = self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions', headers=self.headers).json()[
+            'session_id'
+        ]
 
     @property
     def app(self):
@@ -87,23 +92,38 @@ class QuotaFixture(AuthAPIFixture):
         return self.client.get('/api/v1/quota', headers=self.headers).raise_for_status().json()
 
     def submit_screening(self, body=None):
-        return self.client.post(f'/api/v1/pets/{self.pet_id}/screenings', headers=self.headers,
-                                json=body if body is not None else {'spirit': 'normal', 'appetite': 'normal'})
+        return self.client.post(
+            f'/api/v1/pets/{self.pet_id}/screenings',
+            headers=self.headers,
+            json=body if body is not None else {'spirit': 'normal', 'appetite': 'normal'},
+        )
 
     def make_media(self, kind='photo'):
         media_id = uuid4().hex
         content_type = 'image/png' if kind == 'photo' else 'audio/wav'
         with Session(self.engine) as db, db.begin():
-            db.add(MediaUpload(id=media_id, pet_id=self.pet_id, kind=kind, content_type=content_type,
-                               size_bytes=1024, expires_at=utcnow() + timedelta(minutes=10), version_id='version-1'))
+            db.add(
+                MediaUpload(
+                    id=media_id,
+                    pet_id=self.pet_id,
+                    kind=kind,
+                    content_type=content_type,
+                    size_bytes=1024,
+                    expires_at=utcnow() + timedelta(minutes=10),
+                    version_id='version-1',
+                )
+            )
         return media_id
 
     def send_text(self, content='喵呜', key=None):
         headers = dict(self.headers)
         if key:
             headers['Idempotency-Key'] = key
-        return self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages', headers=headers,
-                                json={'kind': 'text', 'content': content})
+        return self.client.post(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            headers=headers,
+            json={'kind': 'text', 'content': content},
+        )
 
 
 class QuotaAPITests(QuotaFixture, unittest.TestCase):
@@ -112,9 +132,14 @@ class QuotaAPITests(QuotaFixture, unittest.TestCase):
 
     def test_quota_endpoint_shape(self):
         data = self.quota()
-        self.assertEqual(data['metrics'], {'screening': {'used': 0, 'limit': 10},
-                                           'avatar_gen': {'used': 0, 'limit': 3},
-                                           'chat_msg': {'used': 0, 'limit': 50}})
+        self.assertEqual(
+            data['metrics'],
+            {
+                'screening': {'used': 0, 'limit': 10},
+                'avatar_gen': {'used': 0, 'limit': 3},
+                'chat_msg': {'used': 0, 'limit': 50},
+            },
+        )
 
     def test_screening_11th_429_redline_exempt_and_counter_exact(self):
         for _ in range(10):
@@ -125,8 +150,9 @@ class QuotaAPITests(QuotaFixture, unittest.TestCase):
         self.assertEqual(body['code'], 'QUOTA_EXCEEDED')
         self.assertIn('明日再试', body['message'])
         self.assertEqual(body['detail']['metric'], 'screening')
-        redline = self.submit_screening({'spirit': 'normal', 'appetite': 'normal',
-                                         'redline_options': ['open_mouth_breathing']})
+        redline = self.submit_screening(
+            {'spirit': 'normal', 'appetite': 'normal', 'redline_options': ['open_mouth_breathing']}
+        )
         self.assertEqual(redline.status_code, 201)
         self.assertEqual(redline.json()['state'], 'urgent')
         self.assertEqual(self.quota()['metrics']['screening'], {'used': 10, 'limit': 10})
@@ -140,27 +166,32 @@ class QuotaAPITests(QuotaFixture, unittest.TestCase):
 
     def settle_task(self, task_id):
         from app.models import Task
+
         with Session(self.engine) as db, db.begin():
             task = db.get(Task, task_id)
             task.status = 'succeeded'
 
     def test_avatar_quota_counts_new_tasks_not_merges(self):
-        first = self.client.post(f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers,
-                                 json={'media_id': self.make_media()})
+        first = self.client.post(
+            f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers, json={'media_id': self.make_media()}
+        )
         self.assertEqual(first.status_code, 202)
-        merge = self.client.post(f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers,
-                                 json={'media_id': self.make_media()})
+        merge = self.client.post(
+            f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers, json={'media_id': self.make_media()}
+        )
         self.assertEqual(merge.status_code, 202)
         self.assertEqual(merge.json()['task_id'], first.json()['task_id'])
         self.assertEqual(self.quota()['metrics']['avatar_gen']['used'], 1)
         self.settle_task(first.json()['task_id'])
         for _ in range(2):
-            response = self.client.post(f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers,
-                                        json={'media_id': self.make_media()})
+            response = self.client.post(
+                f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers, json={'media_id': self.make_media()}
+            )
             self.assertEqual(response.status_code, 202)
             self.settle_task(response.json()['task_id'])
-        blocked = self.client.post(f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers,
-                                   json={'media_id': self.make_media()})
+        blocked = self.client.post(
+            f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers, json={'media_id': self.make_media()}
+        )
         self.assertEqual(blocked.status_code, 429)
         self.assertEqual(blocked.json()['code'], 'QUOTA_EXCEEDED')
         self.assertEqual(self.quota()['metrics']['avatar_gen'], {'used': 3, 'limit': 3})
@@ -177,8 +208,11 @@ class QuotaAPITests(QuotaFixture, unittest.TestCase):
             blocked = self.send_text('第四句')
             self.assertEqual(blocked.status_code, 429)
             self.assertIn('明日再试', blocked.json()['message'])
-            audio = self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages', headers=self.headers,
-                                     json={'kind': 'audio', 'media_id': self.make_media(kind='audio')})
+            audio = self.client.post(
+                f'/api/v1/chat/sessions/{self.session_id}/messages',
+                headers=self.headers,
+                json={'kind': 'audio', 'media_id': self.make_media(kind='audio')},
+            )
             self.assertEqual(audio.status_code, 202)
             self.assertEqual(self.quota()['metrics']['chat_msg'], {'used': 3, 'limit': 3})
 

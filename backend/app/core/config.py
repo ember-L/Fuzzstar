@@ -8,9 +8,10 @@ application factory.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any
 from urllib.parse import urlsplit
 
 from app.core.env import load_env
@@ -48,7 +49,7 @@ class Settings:
     admin_emails: frozenset[str]
 
     @classmethod
-    def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> 'Settings':
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
         """Read and validate settings, raising RuntimeError on misconfiguration.
 
         When the process environment is used, ``.env`` is loaded first so every
@@ -76,8 +77,7 @@ class Settings:
                 raise RuntimeError('Policy URLs must be HTTPS links')
 
         admin_emails = frozenset(
-            item.strip().lower() for item in env.get('ADMIN_EMAILS', '').split(',')
-            if item.strip()
+            item.strip().lower() for item in env.get('ADMIN_EMAILS', '').split(',') if item.strip()
         )
         for email in admin_emails:
             if '@' not in email or len(email) > 128:

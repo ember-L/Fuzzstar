@@ -3,6 +3,7 @@
 LLM 不参与打分。事件扣分以落库快照为准（score_delta 随规则版本存档），
 observe 事件 72h 无复查在读时衰减为 0 并保留明细；vet/urgent 不自动衰减。
 """
+
 from datetime import datetime, timedelta
 
 SEVERITY_ORDER = {'normal': 0, 'observe': 1, 'vet': 2, 'urgent': 3}
@@ -27,10 +28,19 @@ def compute_health(events: list[dict], *, has_screening: bool, now: datetime, de
         effective_total += effective_delta
         if not decayed and SEVERITY_ORDER[event['severity']] > SEVERITY_ORDER[state]:
             state = event['severity']
-        deductions.append({'id': event['id'], 'source': event['source'], 'source_id': event['source_id'],
-                           'severity': event['severity'], 'symptoms': event.get('symptoms', []),
-                           'score_delta': event['score_delta'], 'effective_delta': effective_delta,
-                           'decayed': decayed, 'created_at': event['created_at'],
-                           'rules_version': event.get('rules_version')})
+        deductions.append(
+            {
+                'id': event['id'],
+                'source': event['source'],
+                'source_id': event['source_id'],
+                'severity': event['severity'],
+                'symptoms': event.get('symptoms', []),
+                'score_delta': event['score_delta'],
+                'effective_delta': effective_delta,
+                'decayed': decayed,
+                'created_at': event['created_at'],
+                'rules_version': event.get('rules_version'),
+            }
+        )
     score = None if not has_screening and not events else max(0, 100 - effective_total)
     return {'state': state, 'score': score, 'deductions': deductions}

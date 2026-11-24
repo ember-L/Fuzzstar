@@ -1,4 +1,5 @@
 """占位片库构建与清单契约（FRD F03-4，ARCHITECTURE 分身资产管线）。"""
+
 import hashlib
 import json
 import math
@@ -14,8 +15,12 @@ ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 
 
 def probe(path: Path) -> dict:
-    out = subprocess.run(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(path)],
-                         capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return json.loads(out.stdout)
 
 
@@ -24,8 +29,9 @@ class BuildLibraryTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.tmp.name)
-        cls.manifest = placeholders.build_library(cls.root, version='vtest', width=320, height=180,
-                                                  fps=12, duration=1.0, supersample=1)
+        cls.manifest = placeholders.build_library(
+            cls.root, version='vtest', width=320, height=180, fps=12, duration=1.0, supersample=1
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -58,8 +64,9 @@ class BuildLibraryTests(unittest.TestCase):
 
     def test_build_is_deterministic(self):
         with tempfile.TemporaryDirectory() as other:
-            again = placeholders.build_library(Path(other), version='vtest', width=320, height=180,
-                                               fps=12, duration=1.0, supersample=1)
+            again = placeholders.build_library(
+                Path(other), version='vtest', width=320, height=180, fps=12, duration=1.0, supersample=1
+            )
         self.assertEqual(again['clips'], self.manifest['clips'])
 
     def test_frames_loop_align_at_full_period(self):
@@ -74,8 +81,9 @@ class LibraryLoadingTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        placeholders.build_library(self.root, version='vtest', width=320, height=180,
-                                   fps=12, duration=1.0, supersample=1)
+        placeholders.build_library(
+            self.root, version='vtest', width=320, height=180, fps=12, duration=1.0, supersample=1
+        )
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -91,10 +99,13 @@ class LibraryLoadingTests(unittest.TestCase):
 
     def test_clip_path_whitelist(self):
         library = placeholders.load_library(self.root)
-        self.assertEqual(library.clip_path('vtest', 'standard', 'idle'),
-                         self.root / 'standard' / 'idle.mp4')
-        for version, body_type, action in (('vother', 'standard', 'idle'), ('vtest', 'fat', 'idle'),
-                                           ('vtest', 'standard', 'jump'), ('vtest', '../x', 'idle')):
+        self.assertEqual(library.clip_path('vtest', 'standard', 'idle'), self.root / 'standard' / 'idle.mp4')
+        for version, body_type, action in (
+            ('vother', 'standard', 'idle'),
+            ('vtest', 'fat', 'idle'),
+            ('vtest', 'standard', 'jump'),
+            ('vtest', '../x', 'idle'),
+        ):
             self.assertIsNone(library.clip_path(version, body_type, action))
 
     def test_manifest_payload_groups_urls(self):
@@ -102,8 +113,9 @@ class LibraryLoadingTests(unittest.TestCase):
         payload = placeholders.manifest_payload(library, base_url='https://api.example/api/v1/avatar/placeholders')
         self.assertEqual(payload['version'], 'vtest')
         self.assertEqual(set(payload['groups']), set(BODY_TYPES))
-        self.assertEqual(payload['groups']['chubby']['sick'],
-                         'https://api.example/api/v1/avatar/placeholders/vtest/chubby/sick.mp4')
+        self.assertEqual(
+            payload['groups']['chubby']['sick'], 'https://api.example/api/v1/avatar/placeholders/vtest/chubby/sick.mp4'
+        )
 
 
 if __name__ == '__main__':

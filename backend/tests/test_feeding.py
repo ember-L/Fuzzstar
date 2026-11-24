@@ -1,4 +1,5 @@
 """T12 喂养参考纯公式（附录 E）：RER/DER、生命阶段系数、能量密度与免责尾注。"""
+
 import tempfile
 import unittest
 from datetime import date, datetime
@@ -6,10 +7,10 @@ from pathlib import Path
 
 from app.services.feeding import (
     FEEDING_DISCLAIMER,
+    feeding_reference,
     kcal_estimate,
     life_stage,
     load_feeding_config,
-    feeding_reference,
 )
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
@@ -31,7 +32,9 @@ class FeedingConfigTests(unittest.TestCase):
 
     def test_invalid_config_raises(self):
         cases = [
-            'version: ' + 'x' * 33 + '\ndensities: {dry: 3.8, wet: 0.9}\ncoefficients: {kitten_under_4m: 3.0, kitten_4_12m: 2.0, adult_neutered: 1.2, adult_intact: 1.4, senior: 1.1}\nrer_factor: 70\nrer_exponent: 0.75\n',
+            'version: '
+            + 'x' * 33
+            + '\ndensities: {dry: 3.8, wet: 0.9}\ncoefficients: {kitten_under_4m: 3.0, kitten_4_12m: 2.0, adult_neutered: 1.2, adult_intact: 1.4, senior: 1.1}\nrer_factor: 70\nrer_exponent: 0.75\n',
             'version: fd-1\ndensities: {dry: -1, wet: 0.9}\ncoefficients: {kitten_under_4m: 3.0, kitten_4_12m: 2.0, adult_neutered: 1.2, adult_intact: 1.4, senior: 1.1}\nrer_factor: 70\nrer_exponent: 0.75\n',
             'version: fd-1\ndensities: {dry: 3.8, wet: 0.9}\ncoefficients: {kitten_under_4m: 3.0}\nrer_factor: 70\nrer_exponent: 0.75\n',
         ]
@@ -61,12 +64,12 @@ class KcalTests(unittest.TestCase):
 class LifeStageTests(unittest.TestCase):
     def test_stages_by_calendar_months(self):
         cases = [
-            (date(2026, 9, 20), False, 'kitten_under_4m'),   # ~2 月龄
-            (date(2026, 5, 19), False, 'kitten_4_12m'),     # 6 月龄
+            (date(2026, 9, 20), False, 'kitten_under_4m'),  # ~2 月龄
+            (date(2026, 5, 19), False, 'kitten_4_12m'),  # 6 月龄
             (date(2024, 1, 1), True, 'adult_neutered'),
             (date(2024, 1, 1), False, 'adult_intact'),
-            (date(2014, 1, 1), True, 'senior'),             # ≥11 岁优先
-            (None, True, 'adult_neutered'),                 # 无生日按成年
+            (date(2014, 1, 1), True, 'senior'),  # ≥11 岁优先
+            (None, True, 'adult_neutered'),  # 无生日按成年
             (None, False, 'adult_intact'),
         ]
         for birth, neutered, expected in cases:

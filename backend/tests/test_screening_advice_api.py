@@ -1,4 +1,5 @@
 """T10：初筛建议入队、urgent 模板即存、GET 建议状态解析（pending/ready/degraded）。"""
+
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -6,15 +7,18 @@ from unittest import TestCase
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
 from test_screening_api import ScreeningFixture
-from app.services.advice import load_advice_templates
+
 from app.core.security import utcnow
 from app.models import AiUsageLog, HealthScreening, Task
+from app.services.advice import load_advice_templates
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
-OBSERVE_BODY = {'spirit': 'normal', 'appetite': 'normal',
-                'symptoms': [{'code': 'vomiting', 'duration': '2-12h', 'frequency': '2-3'}]}
+OBSERVE_BODY = {
+    'spirit': 'normal',
+    'appetite': 'normal',
+    'symptoms': [{'code': 'vomiting', 'duration': '2-12h', 'frequency': '2-3'}],
+}
 URGENT_BODY = {'spirit': 'normal', 'appetite': 'normal', 'redline_options': ['open_mouth_breathing']}
 HEX32 = re.compile(r'^[0-9a-f]{32}$')
 
@@ -47,7 +51,9 @@ class SubmissionAdviceTests(AdviceApiFixture, TestCase):
         self.assertRegex(body['task_id'], HEX32)
         task = self.task_for(body['screening_id'])
         self.assertIsNotNone(task)
-        self.assertEqual((task.id, task.status, task.payload), (body['task_id'], 'pending', {'screening_id': body['screening_id']}))
+        self.assertEqual(
+            (task.id, task.status, task.payload), (body['task_id'], 'pending', {'screening_id': body['screening_id']})
+        )
         with Session(self.engine) as db:
             self.assertEqual(db.get(HealthScreening, body['screening_id']).task_id, task.id)
         detail = self.detail(body['screening_id'])
@@ -95,8 +101,10 @@ class DetailAdviceTests(AdviceApiFixture, TestCase):
             screening.advice_json = {'source': 'llm', 'text': '留意呕吐频次并记录。', 'tips': ['记录时间', '拍照存证']}
             db.commit()
         advice = self.detail(body['screening_id'])['advice']
-        self.assertEqual(advice, {'status': 'ready', 'source': 'llm', 'text': '留意呕吐频次并记录。',
-                                  'tips': ['记录时间', '拍照存证']})
+        self.assertEqual(
+            advice,
+            {'status': 'ready', 'source': 'llm', 'text': '留意呕吐频次并记录。', 'tips': ['记录时间', '拍照存证']},
+        )
 
     def test_failed_task_degrades_to_template(self):
         body = self.submit_observe()
@@ -113,7 +121,12 @@ class DetailAdviceTests(AdviceApiFixture, TestCase):
         self.patch_task(body['task_id'], status='failed', attempts=3)
         with Session(self.engine) as db:
             screening = db.get(HealthScreening, body['screening_id'])
-            screening.advice_json = {'source': 'template', 'text': '模板', 'tips': ['t'], 'template_version': 'at-2026-11-19'}
+            screening.advice_json = {
+                'source': 'template',
+                'text': '模板',
+                'tips': ['t'],
+                'template_version': 'at-2026-11-19',
+            }
             db.commit()
         advice = self.detail(body['screening_id'])['advice']
         self.assertEqual((advice['status'], advice['source'], advice['text']), ('degraded', 'template', '模板'))

@@ -1,0 +1,18 @@
+# 统一换行与二进制识别，避免 Windows / macOS 协作时整文件 diff。
+* text=auto
+
+*.py     text diff=python
+*.md     text
+*.yml    text
+*.yaml   text
+*.json   text
+*.toml   text
+*.ini    text
+
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.mp4    binary
+*.db     binary
+*.woff2  binary

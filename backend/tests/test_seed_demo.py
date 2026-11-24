@@ -11,17 +11,18 @@ from scripts.seed_demo import DEMO_EMAIL, DEMO_PASSWORD, seed_demo
 
 class SeedDemoTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine('sqlite://', connect_args={'check_same_thread': False},
-                                    poolclass=StaticPool)
+        self.engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
         Base.metadata.create_all(self.engine)
-        self.settings = Settings.from_env({
-            'DATABASE_URL': 'sqlite://',
-            'JWT_SECRET': 'test-signing-key-32-bytes-or-more',
-            'PRIVACY_VERSION': 'p1',
-            'TERMS_VERSION': 't1',
-            'PRIVACY_URL': 'https://example.com/privacy',
-            'TERMS_URL': 'https://example.com/terms',
-        })
+        self.settings = Settings.from_env(
+            {
+                'DATABASE_URL': 'sqlite://',
+                'JWT_SECRET': 'test-signing-key-32-bytes-or-more',
+                'PRIVACY_VERSION': 'p1',
+                'TERMS_VERSION': 't1',
+                'PRIVACY_URL': 'https://example.com/privacy',
+                'TERMS_URL': 'https://example.com/terms',
+            }
+        )
 
     def tearDown(self):
         self.engine.dispose()
@@ -45,8 +46,7 @@ class SeedDemoTests(unittest.TestCase):
         with Session(self.engine) as session:
             second = seed_demo(session, self.settings)
             session.commit()
-        self.assertEqual(second['created'],
-                         {'weights': 0, 'diet': 0, 'screenings': 0, 'chat_messages': 0})
+        self.assertEqual(second['created'], {'weights': 0, 'diet': 0, 'screenings': 0, 'chat_messages': 0})
         self.assertEqual(self._count(User), 1)
         self.assertEqual(self._count(WeightRecord), 5)
         self.assertEqual(self._count(DietRecord), 4)

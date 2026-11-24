@@ -1,7 +1,6 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -44,35 +43,57 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def create_email_account(session: Session, email: str, password: str, now: datetime,
-                         *, verification_token: Optional[str] = None) -> str:
+def create_email_account(
+    session: Session, email: str, password: str, now: datetime, *, verification_token: str | None = None
+) -> str:
     email = normalize_email(email)
-    if not 8 <= len(password) <= 128 or not any(c.isascii() and c.isalpha() for c in password) or not any(c.isascii() and c.isdigit() for c in password):
+    if (
+        not 8 <= len(password) <= 128
+        or not any(c.isascii() and c.isalpha() for c in password)
+        or not any(c.isascii() and c.isdigit() for c in password)
+    ):
         raise ValueError('password must contain letters and digits and have 8 to 128 characters')
-    if session.scalar(select(UserCredential.id).where(UserCredential.type == 'email', UserCredential.identifier == email)) is not None:
+    if (
+        session.scalar(
+            select(UserCredential.id).where(UserCredential.type == 'email', UserCredential.identifier == email)
+        )
+        is not None
+    ):
         raise EmailAlreadyRegistered('email already registered')
     token = verification_token if verification_token is not None else secrets.token_urlsafe(32)
     user = User(nickname='猫咪主人')
     session.add(user)
     session.flush()
-    session.add(UserCredential(user_id=user.id, type='email', identifier=email,
-                               secret_hash=password_hasher.hash(password), verification_hash=token_hash(token),
-                               verification_expires_at=now + timedelta(hours=24)))
+    session.add(
+        UserCredential(
+            user_id=user.id,
+            type='email',
+            identifier=email,
+            secret_hash=password_hasher.hash(password),
+            verification_hash=token_hash(token),
+            verification_expires_at=now + timedelta(hours=24),
+        )
+    )
     session.flush()
     return token
 
 
 def verify_email(session: Session, token: str, now: datetime) -> None:
-    result = session.execute(update(UserCredential).where(
-        UserCredential.type == 'email', UserCredential.verification_hash == token_hash(token),
-        UserCredential.verification_expires_at > now, UserCredential.verified_at.is_(None)
-    ).values(verified_at=now, verification_hash=None, verification_expires_at=None))
+    result = session.execute(
+        update(UserCredential)
+        .where(
+            UserCredential.type == 'email',
+            UserCredential.verification_hash == token_hash(token),
+            UserCredential.verification_expires_at > now,
+            UserCredential.verified_at.is_(None),
+        )
+        .values(verified_at=now, verification_hash=None, verification_expires_at=None)
+    )
     if result.rowcount != 1:
         raise InvalidVerification()
 
 
-def login_email(session: Session, email: str, password: str, *,
-                allow_unverified: bool = False) -> User:
+def login_email(session: Session, email: str, password: str, *, allow_unverified: bool = False) -> User:
     """Authenticate with email + password.
 
     ``allow_unverified`` lets whitelisted console admins sign in without
@@ -82,7 +103,9 @@ def login_email(session: Session, email: str, password: str, *,
         email = normalize_email(email)
     except ValueError as exc:
         raise InvalidCredentials() from exc
-    credential = session.scalar(select(UserCredential).where(UserCredential.type == 'email', UserCredential.identifier == email))
+    credential = session.scalar(
+        select(UserCredential).where(UserCredential.type == 'email', UserCredential.identifier == email)
+    )
     if credential is None or credential.secret_hash is None:
         raise InvalidCredentials()
     try:

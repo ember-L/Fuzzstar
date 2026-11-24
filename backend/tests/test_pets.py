@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.models import Base, Pet, User
-from app.services.pets import PetInput, PetLimitReached, PetNotFound, create_pet, delete_pet, get_pet, list_pets, update_pet
+from app.services.pets import (
+    PetInput,
+    PetLimitReached,
+    PetNotFound,
+    create_pet,
+    delete_pet,
+    get_pet,
+    list_pets,
+    update_pet,
+)
 
 
 class PetServiceTests(unittest.TestCase):
@@ -54,8 +63,13 @@ class PetServiceTests(unittest.TestCase):
         self.assertEqual(len(list_pets(self.session, 1)), 5)
 
     def test_profile_input_rejects_invalid_values(self):
-        for values in ({'name': '   '}, {'name': '猫' * 65}, {'name': '猫', 'sex': 'other'},
-                       {'name': '猫', 'birth_date': date(2999, 1, 1)}, {'name': '猫', 'species': 'dog'}):
+        for values in (
+            {'name': '   '},
+            {'name': '猫' * 65},
+            {'name': '猫', 'sex': 'other'},
+            {'name': '猫', 'birth_date': date(2999, 1, 1)},
+            {'name': '猫', 'species': 'dog'},
+        ):
             with self.subTest(values=values), self.assertRaises(ValidationError):
                 PetInput(**values)
 

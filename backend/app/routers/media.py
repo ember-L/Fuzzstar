@@ -8,12 +8,21 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.deps import consented_user, owned_pet
 from app.core.errors import APIError
 from app.core.security import utcnow
-from app.services.media import (AUDIO_FORMATS, DOWNLOAD_SECONDS, FORMATS, MAX_AUDIO_BYTES, MAX_PHOTO_BYTES,
-                       MAX_VIDEO_BYTES, UPLOAD_SECONDS, VIDEO_FORMATS, storage_unavailable)
 from app.models import MediaUpload, Pet, User
-from app.core.deps import consented_user, owned_pet
+from app.services.media import (
+    AUDIO_FORMATS,
+    DOWNLOAD_SECONDS,
+    FORMATS,
+    MAX_AUDIO_BYTES,
+    MAX_PHOTO_BYTES,
+    MAX_VIDEO_BYTES,
+    UPLOAD_SECONDS,
+    VIDEO_FORMATS,
+    storage_unavailable,
+)
 
 router = APIRouter(prefix='/api/v1/media')
 
@@ -28,8 +37,13 @@ class PresignPhoto(BaseModel):
 
 
 @router.post('/presign', status_code=201)
-def presign_photo(data: PresignPhoto, request: Request, response: Response,
-                  user: User = Depends(consented_user), db: Session = Depends(get_db)):
+def presign_photo(
+    data: PresignPhoto,
+    request: Request,
+    response: Response,
+    user: User = Depends(consented_user),
+    db: Session = Depends(get_db),
+):
     owned_pet(data.pet_id, user, db)
     if data.kind == 'video':
         if data.content_type not in VIDEO_FORMATS or not 0 < data.size_bytes <= MAX_VIDEO_BYTES:
@@ -50,19 +64,27 @@ def presign_photo(data: PresignPhoto, request: Request, response: Response,
     return {'media_id': photo.id, 'expires_in': UPLOAD_SECONDS, 'upload': upload}
 
 
-def owned_photo(media_id: str = Path(pattern=r'^[0-9a-f]{32}$'),
-                user: User = Depends(consented_user), db: Session = Depends(get_db)):
-    photo = db.scalar(select(MediaUpload).join(Pet, Pet.id == MediaUpload.pet_id).where(
-        MediaUpload.id == media_id, Pet.user_id == user.id, Pet.status == 'active',
-    ))
+def owned_photo(
+    media_id: str = Path(pattern=r'^[0-9a-f]{32}$'), user: User = Depends(consented_user), db: Session = Depends(get_db)
+):
+    photo = db.scalar(
+        select(MediaUpload)
+        .join(Pet, Pet.id == MediaUpload.pet_id)
+        .where(
+            MediaUpload.id == media_id,
+            Pet.user_id == user.id,
+            Pet.status == 'active',
+        )
+    )
     if photo is None:
         raise APIError(404, 'NOT_FOUND', '未找到照片上传记录')
     return photo
 
 
 @router.post('/{media_id}/complete')
-def complete_photo(request: Request, response: Response, photo: MediaUpload = Depends(owned_photo),
-                   db: Session = Depends(get_db)):
+def complete_photo(
+    request: Request, response: Response, photo: MediaUpload = Depends(owned_photo), db: Session = Depends(get_db)
+):
     media_id = photo.id
     if photo.version_id is None:
         if photo.expires_at <= utcnow():
@@ -74,8 +96,11 @@ def complete_photo(request: Request, response: Response, photo: MediaUpload = De
         if photo.expires_at <= utcnow():
             raise APIError(410, 'MEDIA_EXPIRED', '上传已过期，请重新申请')
         # First successful verification wins, even if the signed POST is reused.
-        db.execute(update(MediaUpload).where(MediaUpload.id == media_id, MediaUpload.version_id.is_(None))
-                   .values(version_id=version))
+        db.execute(
+            update(MediaUpload)
+            .where(MediaUpload.id == media_id, MediaUpload.version_id.is_(None))
+            .values(version_id=version)
+        )
         db.commit()
     response.headers['Cache-Control'] = 'no-store'
     return {'media_id': media_id, 'status': 'verified'}

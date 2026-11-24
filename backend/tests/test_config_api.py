@@ -1,10 +1,12 @@
 """动作映射配置接口（FRD 附录 C，ARCHITECTURE 版本化配置）。"""
+
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.services.rules import load_action_map
 from test_auth_api import AuthAPIFixture
+
+from app.services.rules import load_action_map
 
 ACTIONS = {'idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right'}
 
@@ -12,11 +14,12 @@ ACTIONS = {'idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right'}
 class ActionMapAPITests(AuthAPIFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
 
     def consent(self):
-        self.client.post('/api/v1/consents', headers=self.headers,
-                         json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
 
     def test_requires_login(self):
         response = self.client.get('/api/v1/config/action-map')
@@ -83,14 +86,18 @@ class ActionMapLoaderTests(unittest.TestCase):
         self.assertEqual(loaded['version'], 'am-2026-11-18')
 
     def test_invalid_action_rejected(self):
-        self.write('version: v1\nactions: [idle, jump]\npriority: [health]\n'
-                   'rules:\n  - {source: health, condition: {state: normal}, action: idle}\n')
+        self.write(
+            'version: v1\nactions: [idle, jump]\npriority: [health]\n'
+            'rules:\n  - {source: health, condition: {state: normal}, action: idle}\n'
+        )
         with self.assertRaises(RuntimeError):
             load_action_map(self.dir)
 
     def test_unknown_rule_source_rejected(self):
-        self.write('version: v1\nactions: [idle, happy, sad, sick, crouch, look_left, look_right]\n'
-                   'priority: [health]\nrules:\n  - {source: mood, condition: {x: 1}, action: idle}\n')
+        self.write(
+            'version: v1\nactions: [idle, happy, sad, sick, crouch, look_left, look_right]\n'
+            'priority: [health]\nrules:\n  - {source: mood, condition: {x: 1}, action: idle}\n'
+        )
         with self.assertRaises(RuntimeError):
             load_action_map(self.dir)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-from typing import Literal, Optional
+from datetime import UTC, date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
@@ -15,15 +15,15 @@ class PetInput(BaseModel):
 
     name: str = Field(min_length=1, max_length=64)
     species: Literal['cat'] = 'cat'
-    breed: Optional[str] = Field(default=None, max_length=64)
+    breed: str | None = Field(default=None, max_length=64)
     sex: Literal['male', 'female', 'unknown'] = 'unknown'
-    birth_date: Optional[date] = None
+    birth_date: date | None = None
     neutered: bool = False
     body_type: Literal['slim', 'standard', 'chubby'] = 'standard'
 
     @field_validator('birth_date')
     @classmethod
-    def birth_date_not_future(cls, value: Optional[date]) -> Optional[date]:
+    def birth_date_not_future(cls, value: date | None) -> date | None:
         if value is not None and value > date.today():
             raise ValueError('birth date cannot be in the future')
         return value
@@ -53,7 +53,9 @@ def create_pet(session: Session, user_id: int, data: PetInput, limit: int = 5) -
     owner = session.scalar(select(User).where(User.id == user_id, User.status == 'active').with_for_update())
     if owner is None:
         raise PetNotFound()
-    active_ids = session.scalars(select(Pet.id).where(Pet.user_id == user_id, Pet.status == 'active').with_for_update()).all()
+    active_ids = session.scalars(
+        select(Pet.id).where(Pet.user_id == user_id, Pet.status == 'active').with_for_update()
+    ).all()
     if len(active_ids) >= limit:
         raise PetLimitReached()
     pet = Pet(user_id=user_id, **data.model_dump())
@@ -73,5 +75,5 @@ def update_pet(session: Session, user_id: int, pet_id: int, data: PetInput) -> P
 def delete_pet(session: Session, user_id: int, pet_id: int) -> None:
     pet = get_pet(session, user_id, pet_id)
     pet.status = 'deleted'
-    pet.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    pet.deleted_at = datetime.now(UTC).replace(tzinfo=None)
     session.flush()

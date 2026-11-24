@@ -67,8 +67,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(instance: FastAPI):
-        engine = create_engine(settings.database_url, hide_parameters=True,
-                               pool_pre_ping=True, pool_recycle=1800)
+        engine = create_engine(settings.database_url, hide_parameters=True, pool_pre_ping=True, pool_recycle=1800)
         instance.state.engine = engine
         try:
             yield

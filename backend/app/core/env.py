@@ -15,8 +15,8 @@ one-off `VAR=value command` overrides stay authoritative.
 """
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Mapping, Optional
 from urllib.parse import quote_plus
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +28,7 @@ DEFAULT_DB_NAME = 'rongxing'
 DEFAULT_DB_USER = 'rongxing'
 
 
-def parse_env(text: str) -> Dict[str, str]:
+def parse_env(text: str) -> dict[str, str]:
     """Parse `KEY=VALUE` lines, tolerating comments, blank lines and quotes."""
 
     values = {}
@@ -37,7 +37,7 @@ def parse_env(text: str) -> Dict[str, str]:
         if not line or line.startswith('#'):
             continue
         if line.startswith('export '):
-            line = line[len('export '):].lstrip()
+            line = line[len('export ') :].lstrip()
         key, separator, value = line.partition('=')
         key = key.strip()
         if not separator or not key:
@@ -49,14 +49,14 @@ def parse_env(text: str) -> Dict[str, str]:
     return values
 
 
-def _read(path: Path) -> Dict[str, str]:
+def _read(path: Path) -> dict[str, str]:
     try:
         return parse_env(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         return {}
 
 
-def build_database_url(env: Mapping[str, str]) -> Optional[str]:
+def build_database_url(env: Mapping[str, str]) -> str | None:
     """Compose ``DATABASE_URL`` from ``SERVER_HOST`` and the ``DB_*`` defaults.
 
     Returns ``None`` when ``SERVER_HOST`` is missing, so callers can keep
@@ -71,11 +71,10 @@ def build_database_url(env: Mapping[str, str]) -> Optional[str]:
     password = env.get('DB_PASSWORD') or ''
     port = (env.get('DB_PORT') or DEFAULT_DB_PORT).strip()
     name = (env.get('DB_NAME') or DEFAULT_DB_NAME).strip()
-    return (f'mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}'
-            f'@{host}:{port}/{name}?charset=utf8mb4')
+    return f'mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{name}?charset=utf8mb4'
 
 
-def load_env(path: Optional[Path] = None) -> Dict[str, str]:
+def load_env(path: Path | None = None) -> dict[str, str]:
     """Load configuration into `os.environ` without overriding existing values.
 
     With no argument, ``team.env`` is loaded first and ``.env`` second, so the
@@ -90,7 +89,7 @@ def load_env(path: Optional[Path] = None) -> Dict[str, str]:
             os.environ.setdefault(key, value)
         return loaded
 
-    loaded: Dict[str, str] = {}
+    loaded: dict[str, str] = {}
     for target in (TEAM_ENV_PATH, ENV_PATH):
         values = _read(target)
         loaded.update(values)

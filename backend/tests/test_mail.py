@@ -11,9 +11,14 @@ class MailTests(unittest.TestCase):
                 send_verification_email('cat@example.com', 'token')
 
     def test_sends_verification_link_over_tls(self):
-        config = {'SMTP_HOST': 'smtp.example.com', 'SMTP_PORT': '465',
-                  'SMTP_USER': 'account', 'SMTP_PASSWORD': 'secret',
-                  'SMTP_FROM': 'service@example.com', 'VERIFICATION_BASE_URL': 'https://example.com/verify'}
+        config = {
+            'SMTP_HOST': 'smtp.example.com',
+            'SMTP_PORT': '465',
+            'SMTP_USER': 'account',
+            'SMTP_PASSWORD': 'secret',
+            'SMTP_FROM': 'service@example.com',
+            'VERIFICATION_BASE_URL': 'https://example.com/verify',
+        }
         with patch.dict('os.environ', config, clear=True), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
             send_verification_email('cat@example.com', 'a_token')
             client = smtp.return_value.__enter__.return_value

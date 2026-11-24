@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, func
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -19,8 +18,8 @@ class RequestIdempotency(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True, nullable=False)
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    response_json: Mapped[Optional[dict]] = mapped_column(JSON(none_as_null=True), nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_json: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 
@@ -72,4 +71,4 @@ class Entitlement(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), unique=True, nullable=False)
     plan_id: Mapped[int] = mapped_column(ForeignKey('plans.id'), nullable=False)
     status: Mapped[str] = mapped_column(String(16), default='reserved', server_default='reserved', nullable=False)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

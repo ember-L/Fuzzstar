@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,7 +17,7 @@ class User(Base):
     nickname: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default='active')
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class UserCredential(Base):
@@ -29,10 +28,10 @@ class UserCredential(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True, nullable=False)
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     identifier: Mapped[str] = mapped_column(String(128), nullable=False)
-    secret_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    verification_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
-    verification_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    secret_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_hash: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Consent(Base):
@@ -51,7 +50,7 @@ class AuthSession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True, nullable=False)
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class RefreshToken(Base):
@@ -61,7 +60,7 @@ class RefreshToken(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey('auth_sessions.id'), index=True, nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class VerificationMail(Base):
@@ -70,7 +69,7 @@ class VerificationMail(Base):
     credential_id: Mapped[int] = mapped_column(ForeignKey('user_credentials.id', ondelete='CASCADE'), primary_key=True)
     nonce: Mapped[str] = mapped_column(String(48), nullable=False)
     queued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 

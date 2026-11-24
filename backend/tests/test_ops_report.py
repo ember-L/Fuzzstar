@@ -1,4 +1,5 @@
 """T18: read-only ops report aggregates (AI cost, tasks, denials, quota)."""
+
 import unittest
 from datetime import timedelta
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.core.security import utcnow
-from app.models import (AiUsageLog, Base, Pet, QuotaDenial, Task, UsageCounter, User)
+from app.models import AiUsageLog, Base, Pet, QuotaDenial, Task, UsageCounter, User
 from scripts.ops_report import build_report, render_text
 
 
@@ -23,41 +24,127 @@ class OpsReportTests(unittest.TestCase):
         self.addCleanup(self.engine.dispose)
         self.now = utcnow()
         with Session(self.engine) as db, db.begin():
-            db.add_all([User(id=1, nickname='甲'), User(id=2, nickname='乙'),
-                        Pet(id=1, user_id=1, name='团团', species='cat', status='active')])
-            db.add_all([
-                AiUsageLog(user_id=1, provider='dashscope', model='qwen-plus', kind='llm',
-                           tokens_in=100, tokens_out=30, cost_est=0.002, created_at=self.now - timedelta(days=1)),
-                AiUsageLog(user_id=1, provider='dashscope', model='qwen2-audio-instruct', kind='audio',
-                           media_seconds=12.5, cost_est=0.01, created_at=self.now - timedelta(days=2)),
-                AiUsageLog(user_id=2, provider='dashscope', model='qwen-plus', kind='llm',
-                           tokens_in=50, tokens_out=20, cost_est=0.001, created_at=self.now - timedelta(days=1)),
-                AiUsageLog(user_id=None, provider='dashscope', model='qwen-plus', kind='llm',
-                           tokens_in=10, tokens_out=5, cost_est=0.004, created_at=self.now - timedelta(days=1)),
-                AiUsageLog(user_id=1, provider='dashscope', model='qwen-plus', kind='llm',
-                           tokens_in=999, tokens_out=999, cost_est=9.99, created_at=self.now - timedelta(days=10)),
-            ])
-            db.add_all([
-                Task(id='a' * 32, pet_id=1, type='avatar_batch', status='succeeded', request_key='k1',
-                     payload={}, attempts=1, created_at=self.now - timedelta(hours=2),
-                     updated_at=self.now - timedelta(hours=1)),
-                Task(id='b' * 32, pet_id=1, type='avatar_batch', status='failed', request_key='k2',
-                     payload={}, attempts=3, created_at=self.now - timedelta(hours=3),
-                     updated_at=self.now - timedelta(hours=2)),
-                Task(id='c' * 32, pet_id=1, type='screening_analysis', status='succeeded', request_key='k3',
-                     payload={}, attempts=2, created_at=self.now - timedelta(hours=1),
-                     updated_at=self.now - timedelta(minutes=30)),
-                Task(id='d' * 32, pet_id=1, type='gif_export', status='pending', request_key='k4',
-                     payload={}, attempts=0, created_at=self.now - timedelta(minutes=5),
-                     updated_at=self.now - timedelta(minutes=5)),
-            ])
-            db.add_all([
-                QuotaDenial(user_id=1, metric='chat_msg', day=self.now.date(), created_at=self.now),
-                QuotaDenial(user_id=1, metric='chat_msg', day=self.now.date(), created_at=self.now),
-                QuotaDenial(user_id=2, metric='screening', day=self.now.date() - timedelta(days=1),
-                            created_at=self.now - timedelta(days=1)),
-                UsageCounter(user_id=1, day=self.now.date(), metric='chat_msg', count=5),
-            ])
+            db.add_all(
+                [
+                    User(id=1, nickname='甲'),
+                    User(id=2, nickname='乙'),
+                    Pet(id=1, user_id=1, name='团团', species='cat', status='active'),
+                ]
+            )
+            db.add_all(
+                [
+                    AiUsageLog(
+                        user_id=1,
+                        provider='dashscope',
+                        model='qwen-plus',
+                        kind='llm',
+                        tokens_in=100,
+                        tokens_out=30,
+                        cost_est=0.002,
+                        created_at=self.now - timedelta(days=1),
+                    ),
+                    AiUsageLog(
+                        user_id=1,
+                        provider='dashscope',
+                        model='qwen2-audio-instruct',
+                        kind='audio',
+                        media_seconds=12.5,
+                        cost_est=0.01,
+                        created_at=self.now - timedelta(days=2),
+                    ),
+                    AiUsageLog(
+                        user_id=2,
+                        provider='dashscope',
+                        model='qwen-plus',
+                        kind='llm',
+                        tokens_in=50,
+                        tokens_out=20,
+                        cost_est=0.001,
+                        created_at=self.now - timedelta(days=1),
+                    ),
+                    AiUsageLog(
+                        user_id=None,
+                        provider='dashscope',
+                        model='qwen-plus',
+                        kind='llm',
+                        tokens_in=10,
+                        tokens_out=5,
+                        cost_est=0.004,
+                        created_at=self.now - timedelta(days=1),
+                    ),
+                    AiUsageLog(
+                        user_id=1,
+                        provider='dashscope',
+                        model='qwen-plus',
+                        kind='llm',
+                        tokens_in=999,
+                        tokens_out=999,
+                        cost_est=9.99,
+                        created_at=self.now - timedelta(days=10),
+                    ),
+                ]
+            )
+            db.add_all(
+                [
+                    Task(
+                        id='a' * 32,
+                        pet_id=1,
+                        type='avatar_batch',
+                        status='succeeded',
+                        request_key='k1',
+                        payload={},
+                        attempts=1,
+                        created_at=self.now - timedelta(hours=2),
+                        updated_at=self.now - timedelta(hours=1),
+                    ),
+                    Task(
+                        id='b' * 32,
+                        pet_id=1,
+                        type='avatar_batch',
+                        status='failed',
+                        request_key='k2',
+                        payload={},
+                        attempts=3,
+                        created_at=self.now - timedelta(hours=3),
+                        updated_at=self.now - timedelta(hours=2),
+                    ),
+                    Task(
+                        id='c' * 32,
+                        pet_id=1,
+                        type='screening_analysis',
+                        status='succeeded',
+                        request_key='k3',
+                        payload={},
+                        attempts=2,
+                        created_at=self.now - timedelta(hours=1),
+                        updated_at=self.now - timedelta(minutes=30),
+                    ),
+                    Task(
+                        id='d' * 32,
+                        pet_id=1,
+                        type='gif_export',
+                        status='pending',
+                        request_key='k4',
+                        payload={},
+                        attempts=0,
+                        created_at=self.now - timedelta(minutes=5),
+                        updated_at=self.now - timedelta(minutes=5),
+                    ),
+                ]
+            )
+            db.add_all(
+                [
+                    QuotaDenial(user_id=1, metric='chat_msg', day=self.now.date(), created_at=self.now),
+                    QuotaDenial(user_id=1, metric='chat_msg', day=self.now.date(), created_at=self.now),
+                    QuotaDenial(
+                        user_id=2,
+                        metric='screening',
+                        day=self.now.date() - timedelta(days=1),
+                        created_at=self.now - timedelta(days=1),
+                    ),
+                    UsageCounter(user_id=1, day=self.now.date(), metric='chat_msg', count=5),
+                ]
+            )
 
     def test_ai_calls_and_window(self):
         report = build_report(self.engine, now=self.now, days=7)

@@ -1,4 +1,5 @@
 """F14 萌宠动图：配置校验、GIF 规格、占位生成、提交与读取接口。"""
+
 import asyncio
 import io
 import unittest
@@ -12,15 +13,15 @@ from PIL import Image
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+from test_auth_api import AuthAPIFixture
+from test_avatar_read import FakeStorage
+from test_worker import FakeAssets
 
 from app import worker
 from app.core.security import utcnow
 from app.models import Base, MediaUpload, Pet, Task, User
 from app.providers.motion import PlaceholderMotionProvider
 from app.services.motion import generate_motion, load_motion_config, verify_gif
-from test_auth_api import AuthAPIFixture
-from test_avatar_read import FakeStorage
-from test_worker import FakeAssets
 
 BACKEND = Path(__file__).resolve().parents[1]
 RULES = BACKEND / 'rules'
@@ -47,8 +48,7 @@ def make_photo(color=(180, 120, 80), size=(200, 200)):
 def make_gif(frames=3, duration=100, loop=0, size=(80, 80)):
     images = [Image.new('RGB', size, (200, 140 + index, 60)) for index in range(frames)]
     buffer = io.BytesIO()
-    images[0].save(buffer, 'GIF', save_all=True, append_images=images[1:],
-                   duration=duration, loop=loop, optimize=False)
+    images[0].save(buffer, 'GIF', save_all=True, append_images=images[1:], duration=duration, loop=loop, optimize=False)
     return buffer.getvalue()
 
 
@@ -56,12 +56,25 @@ def motion_result(actions=('idle', 'happy'), ready=('idle', 'happy')):
     gifs = {}
     for action in actions:
         if action in ready:
-            gifs[action] = {'status': 'ready', 'key': f'motions/1/task/{action}.gif', 'version_id': f'v-{action}',
-                            'width': 160, 'height': 160, 'frames': 9, 'duration_s': 1.5, 'bytes': 128}
+            gifs[action] = {
+                'status': 'ready',
+                'key': f'motions/1/task/{action}.gif',
+                'version_id': f'v-{action}',
+                'width': 160,
+                'height': 160,
+                'frames': 9,
+                'duration_s': 1.5,
+                'bytes': 128,
+            }
         else:
             gifs[action] = {'status': 'failed'}
-    return {'base_image': {'key': 'motions/1/task/base.png', 'version_id': 'v-base'},
-            'gifs': gifs, 'ready_count': len(ready), 'usable': len(ready) >= 2, 'config_version': 'mo-test'}
+    return {
+        'base_image': {'key': 'motions/1/task/base.png', 'version_id': 'v-base'},
+        'gifs': gifs,
+        'ready_count': len(ready),
+        'usable': len(ready) >= 2,
+        'config_version': 'mo-test',
+    }
 
 
 class MotionConfigTests(unittest.TestCase):
@@ -81,6 +94,7 @@ class MotionConfigTests(unittest.TestCase):
             config = load_motion_config(RULES)
             config['health'] = {'normal': 'dance'}
             import yaml
+
             path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
             with self.assertRaises(RuntimeError):
                 load_motion_config(Path(tmp))
@@ -90,6 +104,7 @@ class MotionConfigTests(unittest.TestCase):
             config = load_motion_config(RULES)
             config['min_ready'] = len(config['actions']) + 1
             import yaml
+
             (Path(tmp) / 'motion.yaml').write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
             with self.assertRaises(RuntimeError):
                 load_motion_config(Path(tmp))
@@ -99,6 +114,7 @@ class MotionConfigTests(unittest.TestCase):
             config = load_motion_config(RULES)
             config['max_seconds'] = 30
             import yaml
+
             (Path(tmp) / 'motion.yaml').write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
             with self.assertRaises(RuntimeError):
                 load_motion_config(Path(tmp))
@@ -151,10 +167,16 @@ class MotionGenerationTests(unittest.TestCase):
 
     def test_generates_base_and_all_actions(self):
         config = small_config()
-        result = asyncio.run(generate_motion(self.task, SimpleNamespace(version_id='v1', object_key='photos/1/p'), config=config,
-                                             assets=self.assets,
-                                             provider=PlaceholderMotionProvider(**SMALL)))
-        self.assertEqual(result['base_image']['key'], f"motions/1/{'c' * 32}/base.png")
+        result = asyncio.run(
+            generate_motion(
+                self.task,
+                SimpleNamespace(version_id='v1', object_key='photos/1/p'),
+                config=config,
+                assets=self.assets,
+                provider=PlaceholderMotionProvider(**SMALL),
+            )
+        )
+        self.assertEqual(result['base_image']['key'], f'motions/1/{"c" * 32}/base.png')
         self.assertEqual(set(result['gifs']), set(config['actions']))
         self.assertEqual(result['ready_count'], len(config['actions']))
         self.assertTrue(result['usable'])
@@ -173,8 +195,15 @@ class MotionGenerationTests(unittest.TestCase):
                 return await super().animate(image, prompt=prompt, seconds=seconds)
 
         config = small_config()
-        result = asyncio.run(generate_motion(self.task, SimpleNamespace(version_id='v1', object_key='photos/1/p'), config=config,
-                                             assets=self.assets, provider=FailingProvider(**SMALL)))
+        result = asyncio.run(
+            generate_motion(
+                self.task,
+                SimpleNamespace(version_id='v1', object_key='photos/1/p'),
+                config=config,
+                assets=self.assets,
+                provider=FailingProvider(**SMALL),
+            )
+        )
         self.assertEqual(result['gifs']['happy']['status'], 'failed')
         self.assertEqual(result['ready_count'], len(config['actions']) - 1)
         self.assertTrue(result['usable'])
@@ -183,61 +212,96 @@ class MotionGenerationTests(unittest.TestCase):
         class OversizedProvider(PlaceholderMotionProvider):
             async def animate(self, image, *, prompt, seconds):
                 from app.providers.base import GeneratedAsset
+
                 return GeneratedAsset(make_gif(size=(200, 200)), 'image/gif')
 
         config = small_config()
-        result = asyncio.run(generate_motion(self.task, SimpleNamespace(version_id='v1', object_key='photos/1/p'), config=config,
-                                             assets=self.assets, provider=OversizedProvider(**SMALL)))
+        result = asyncio.run(
+            generate_motion(
+                self.task,
+                SimpleNamespace(version_id='v1', object_key='photos/1/p'),
+                config=config,
+                assets=self.assets,
+                provider=OversizedProvider(**SMALL),
+            )
+        )
         self.assertTrue(all(gif['status'] == 'failed' for gif in result['gifs'].values()))
         self.assertFalse(result['usable'])
 
     def test_unverified_media_is_rejected(self):
         with self.assertRaises(ValueError):
-            asyncio.run(generate_motion(self.task, SimpleNamespace(version_id=None), config=small_config(),
-                                        assets=self.assets, provider=PlaceholderMotionProvider(**SMALL)))
+            asyncio.run(
+                generate_motion(
+                    self.task,
+                    SimpleNamespace(version_id=None),
+                    config=small_config(),
+                    assets=self.assets,
+                    provider=PlaceholderMotionProvider(**SMALL),
+                )
+            )
 
 
 class MotionAPITests(AuthAPIFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
-        self.client.post('/api/v1/consents', headers=self.headers,
-                         json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
         self.pet_id = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).json()['id']
 
     def make_media(self, pet_id=None, verified=True):
         media_id = uuid4().hex
         with Session(self.engine) as db, db.begin():
-            db.add(MediaUpload(id=media_id, pet_id=pet_id if pet_id is not None else self.pet_id,
-                               content_type='image/png', size_bytes=1024,
-                               expires_at=utcnow() + timedelta(minutes=10),
-                               version_id='version-1' if verified else None))
+            db.add(
+                MediaUpload(
+                    id=media_id,
+                    pet_id=pet_id if pet_id is not None else self.pet_id,
+                    content_type='image/png',
+                    size_bytes=1024,
+                    expires_at=utcnow() + timedelta(minutes=10),
+                    version_id='version-1' if verified else None,
+                )
+            )
         return media_id
 
     def submit(self, media_id=None, pet_id=None, headers=None):
-        return self.client.post(f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/motion',
-                                json={'media_id': media_id if media_id is not None else self.make_media()},
-                                headers=self.headers if headers is None else headers)
+        return self.client.post(
+            f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/motion',
+            json={'media_id': media_id if media_id is not None else self.make_media()},
+            headers=self.headers if headers is None else headers,
+        )
 
     def read(self, pet_id=None):
-        return self.client.get(f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/motion',
-                               headers=self.headers)
+        return self.client.get(
+            f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/motion', headers=self.headers
+        )
 
     def insert_task(self, status='succeeded', result=None):
         task_id = uuid4().hex
         with Session(self.engine) as db, db.begin():
-            db.add(Task(id=task_id, pet_id=self.pet_id, type='motion_batch', status=status,
-                        request_key=uuid4().hex, payload={'media_id': uuid4().hex},
-                        result=result if result is not None else motion_result(), attempts=1))
+            db.add(
+                Task(
+                    id=task_id,
+                    pet_id=self.pet_id,
+                    type='motion_batch',
+                    status=status,
+                    request_key=uuid4().hex,
+                    payload={'media_id': uuid4().hex},
+                    result=result if result is not None else motion_result(),
+                    attempts=1,
+                )
+            )
         return task_id
 
     def test_requires_login_and_consent(self):
         self.assertEqual(self.submit(headers={}).status_code, 401)
         from app.services.identity import create_email_account, verify_email
+
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'noconsent-motion@example.com', self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login('noconsent-motion@example.com').json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login("noconsent-motion@example.com").json()["access_token"]}'}
         response = self.submit(headers=headers)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()['code'], 'CONSENT_REQUIRED')
@@ -245,10 +309,11 @@ class MotionAPITests(AuthAPIFixture, unittest.TestCase):
     def test_unknown_or_foreign_pet_is_not_found(self):
         self.assertEqual(self.submit(pet_id=999999).status_code, 404)
         from app.services.identity import create_email_account, verify_email
+
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'other-motion@example.com', self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login('other-motion@example.com').json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login("other-motion@example.com").json()["access_token"]}'}
         self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
         self.assertEqual(self.submit(pet_id=self.pet_id, headers=headers).status_code, 404)
 
@@ -338,15 +403,35 @@ class MotionWorkerTests(unittest.TestCase):
         with Session(self.engine) as db, db.begin():
             db.add(User(id=1, nickname='测试用户'))
             db.add(Pet(id=1, user_id=1, name='团团'))
-            db.add(MediaUpload(id=self.media_id, pet_id=1, content_type='image/png', size_bytes=1024,
-                               expires_at=utcnow() + timedelta(minutes=10), version_id='v-photo'))
-            db.add(Task(id=self.task_id, pet_id=1, type='motion_batch', status='pending',
-                        request_key=uuid4().hex, attempts=0,
-                        payload={'media_id': self.media_id, 'config_version': 'mo-test'}))
+            db.add(
+                MediaUpload(
+                    id=self.media_id,
+                    pet_id=1,
+                    content_type='image/png',
+                    size_bytes=1024,
+                    expires_at=utcnow() + timedelta(minutes=10),
+                    version_id='v-photo',
+                )
+            )
+            db.add(
+                Task(
+                    id=self.task_id,
+                    pet_id=1,
+                    type='motion_batch',
+                    status='pending',
+                    request_key=uuid4().hex,
+                    attempts=0,
+                    payload={'media_id': self.media_id, 'config_version': 'mo-test'},
+                )
+            )
 
     def context(self):
-        return {'engine': self.engine, 'assets': self.assets, 'motion_config': small_config(),
-                'motion_provider': PlaceholderMotionProvider(**SMALL)}
+        return {
+            'engine': self.engine,
+            'assets': self.assets,
+            'motion_config': small_config(),
+            'motion_provider': PlaceholderMotionProvider(**SMALL),
+        }
 
     def test_run_task_succeeds(self):
         asyncio.run(worker.run_task(self.context(), self.task_id))

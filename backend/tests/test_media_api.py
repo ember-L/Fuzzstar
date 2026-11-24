@@ -1,19 +1,19 @@
 import base64
 import io
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import TestCase
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy.orm import Session
-
 from test_auth_api import AuthAPIFixture
+
 from app import main
+from app.models import MediaUpload
 from app.services.identity import create_email_account, verify_email
 from app.services.media import PhotoStorage, valid_photo
-from app.models import MediaUpload
 
 # 1×1 PNG; no user media in the test suite.
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC')
@@ -26,7 +26,11 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         self.client.app.state.photo_storage = None
         self.versions = {'privacy': 'p1', 'terms': 't1'}
         self.client.post('/api/v1/consents', headers=self.headers, json=self.versions).raise_for_status()
-        self.pet = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).raise_for_status().json()['id']
+        self.pet = (
+            self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'})
+            .raise_for_status()
+            .json()['id']
+        )
         self.body = {'pet_id': self.pet, 'content_type': 'image/png', 'size_bytes': len(PNG)}
         self.path = '/api/v1/media/presign'
 
@@ -35,8 +39,10 @@ class MediaAPITests(AuthAPIFixture, TestCase):
 
     def configure_storage(self):
         env = {
-            'MEDIA_S3_ENDPOINT': 'http://127.0.0.1:9000', 'MEDIA_S3_BUCKET': 'private-photos',
-            'MEDIA_S3_ACCESS_KEY': 'test-only', 'MEDIA_S3_SECRET_KEY': 'test-only-secret',
+            'MEDIA_S3_ENDPOINT': 'http://127.0.0.1:9000',
+            'MEDIA_S3_BUCKET': 'private-photos',
+            'MEDIA_S3_ACCESS_KEY': 'test-only',
+            'MEDIA_S3_SECRET_KEY': 'test-only-secret',
         }
         with patch.dict('os.environ', env):
             storage = PhotoStorage.from_env()
@@ -44,11 +50,18 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         return storage
 
     def test_partial_or_insecure_storage_configuration_is_rejected(self):
-        env = {'MEDIA_S3_ENDPOINT': 'http://storage.example', 'MEDIA_S3_BUCKET': 'private-photos',
-               'MEDIA_S3_ACCESS_KEY': 'test-only', 'MEDIA_S3_SECRET_KEY': 'test-only-secret'}
+        env = {
+            'MEDIA_S3_ENDPOINT': 'http://storage.example',
+            'MEDIA_S3_BUCKET': 'private-photos',
+            'MEDIA_S3_ACCESS_KEY': 'test-only',
+            'MEDIA_S3_SECRET_KEY': 'test-only-secret',
+        }
         with patch.dict('os.environ', env, clear=True), self.assertRaisesRegex(RuntimeError, 'HTTPS'):
             PhotoStorage.from_env()
-        with patch.dict('os.environ', {'MEDIA_S3_BUCKET': 'private-photos'}, clear=True), self.assertRaises(RuntimeError):
+        with (
+            patch.dict('os.environ', {'MEDIA_S3_BUCKET': 'private-photos'}, clear=True),
+            self.assertRaises(RuntimeError),
+        ):
             PhotoStorage.from_env()
 
     def test_presign_enforces_login_consent_pet_owner_and_input(self):
@@ -74,11 +87,25 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         self.assertIn({'key': f'photos/{self.pet}/{signed["media_id"]}'}, policy['conditions'])
         self.assertIn({'Content-Type': 'image/png'}, policy['conditions'])
         self.assertIn(['content-length-range', len(PNG), len(PNG)], policy['conditions'])
-        self.assertLessEqual((datetime.fromisoformat(policy['expiration'].rstrip('Z')).replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).total_seconds(), 600)
+        self.assertLessEqual(
+            (
+                datetime.fromisoformat(policy['expiration'].rstrip('Z')).replace(tzinfo=UTC) - datetime.now(UTC)
+            ).total_seconds(),
+            600,
+        )
         path = f'/api/v1/media/{signed["media_id"]}/complete'
-        with patch.object(storage.client, 'head_object', return_value={
-            'ContentLength': len(PNG), 'ContentType': 'image/png', 'VersionId': 'verified-v1',
-        }) as head, patch.object(storage.client, 'get_object', return_value={'Body': io.BytesIO(PNG)}) as read:
+        with (
+            patch.object(
+                storage.client,
+                'head_object',
+                return_value={
+                    'ContentLength': len(PNG),
+                    'ContentType': 'image/png',
+                    'VersionId': 'verified-v1',
+                },
+            ) as head,
+            patch.object(storage.client, 'get_object', return_value={'Body': io.BytesIO(PNG)}) as read,
+        ):
             done = self.client.post(path, headers=self.headers).raise_for_status()
             self.assertEqual(done.json(), {'media_id': signed['media_id'], 'status': 'verified'})
             self.assertEqual(read.call_args.kwargs['VersionId'], 'verified-v1')
@@ -95,7 +122,9 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         self.assertEqual(self.client.get(path, headers=self.headers).status_code, 409)
         with Session(self.engine) as db, db.begin():
             db.get(MediaUpload, upload_id).version_id = 'pinned-version'
-        with patch.object(storage.client, 'generate_presigned_url', return_value='https://storage.example/download') as sign:
+        with patch.object(
+            storage.client, 'generate_presigned_url', return_value='https://storage.example/download'
+        ) as sign:
             response = self.client.get(path, headers=self.headers).raise_for_status()
         self.assertEqual(response.json(), {'download_url': 'https://storage.example/download', 'expires_in': 3600})
         self.assertEqual(sign.call_args.args, ('get_object',))
@@ -133,19 +162,38 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         path = f'/api/v1/media/{upload_id}/complete'
         metadata = {'ContentLength': len(PNG), 'ContentType': 'image/png', 'VersionId': 'v1'}
         from botocore.exceptions import ClientError
-        missing = ClientError({'Error': {'Code': 'NoSuchKey'}, 'ResponseMetadata': {'HTTPStatusCode': 404}}, 'HeadObject')
+
+        missing = ClientError(
+            {'Error': {'Code': 'NoSuchKey'}, 'ResponseMetadata': {'HTTPStatusCode': 404}}, 'HeadObject'
+        )
         with patch.object(storage.client, 'head_object', side_effect=missing):
             self.assertEqual(self.client.post(path, headers=self.headers).status_code, 409)
-        for wrong, expected in [({'VersionId': 'null'}, 503), ({'ContentLength': len(PNG) + 1}, 422), ({'ContentType': 'image/jpeg'}, 422)]:
-            with patch.object(storage.client, 'head_object', return_value={**metadata, **wrong}), patch.object(
-                storage.client, 'get_object', side_effect=AssertionError('must reject before download'),
+        for wrong, expected in [
+            ({'VersionId': 'null'}, 503),
+            ({'ContentLength': len(PNG) + 1}, 422),
+            ({'ContentType': 'image/jpeg'}, 422),
+        ]:
+            with (
+                patch.object(storage.client, 'head_object', return_value={**metadata, **wrong}),
+                patch.object(
+                    storage.client,
+                    'get_object',
+                    side_effect=AssertionError('must reject before download'),
+                ),
             ):
                 self.assertEqual(self.client.post(path, headers=self.headers).status_code, expected)
-        with patch.object(storage.client, 'head_object', return_value=metadata), patch.object(
-            storage.client, 'get_object', return_value={'Body': io.BytesIO(b'X' * len(PNG))},
+        with (
+            patch.object(storage.client, 'head_object', return_value=metadata),
+            patch.object(
+                storage.client,
+                'get_object',
+                return_value={'Body': io.BytesIO(b'X' * len(PNG))},
+            ),
         ):
             self.assertEqual(self.client.post(path, headers=self.headers).status_code, 422)
         with Session(self.engine) as db, db.begin():
             db.get(MediaUpload, upload_id).expires_at = datetime(2020, 1, 1)
-        with patch.object(storage.client, 'head_object', side_effect=AssertionError('expired upload must not touch storage')):
+        with patch.object(
+            storage.client, 'head_object', side_effect=AssertionError('expired upload must not touch storage')
+        ):
             self.assertEqual(self.client.post(path, headers=self.headers).status_code, 410)

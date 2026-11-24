@@ -47,6 +47,7 @@ class SessionTests(unittest.TestCase):
 
     def test_refresh_tokens_are_not_stored_in_plaintext(self):
         from app.models import RefreshToken
+
         token = create_session(self.db, 1, self.now)
         self.db.commit()
         record = self.db.scalar(select(RefreshToken))

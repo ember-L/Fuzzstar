@@ -1,5 +1,4 @@
 """Consent records and the request-time consent state used by route guards."""
-from typing import Dict
 
 from fastapi import Request
 from sqlalchemy import select
@@ -16,7 +15,7 @@ def grant_consent(session: Session, user_id: int, consent_type: str, version: st
     session.flush()
 
 
-def latest_consents(session: Session, user_id: int) -> Dict[str, Consent]:
+def latest_consents(session: Session, user_id: int) -> dict[str, Consent]:
     records = session.scalars(select(Consent).where(Consent.user_id == user_id).order_by(Consent.id.desc()))
     latest = {}
     for record in records:
@@ -25,14 +24,16 @@ def latest_consents(session: Session, user_id: int) -> Dict[str, Consent]:
     return latest
 
 
-def current_consents(session: Session, user_id: int) -> Dict[str, bool]:
+def current_consents(session: Session, user_id: int) -> dict[str, bool]:
     return {name: record.granted for name, record in latest_consents(session, user_id).items()}
 
 
 def has_required_consents(session: Session, user_id: int, privacy_version: str, terms_version: str) -> bool:
     records = latest_consents(session, user_id)
-    return all(kind in records and records[kind].granted and records[kind].version == version
-               for kind, version in (('privacy', privacy_version), ('terms', terms_version)))
+    return all(
+        kind in records and records[kind].granted and records[kind].version == version
+        for kind, version in (('privacy', privacy_version), ('terms', terms_version))
+    )
 
 
 def consent_state(session: Session, user: User, request: Request) -> dict:
@@ -44,7 +45,9 @@ def consent_state(session: Session, user: User, request: Request) -> dict:
     return {
         'required': versions,
         'links': request.app.state.policy_links,
-        'granted': all(kind in latest and latest[kind].granted and latest[kind].version == version
-                       for kind, version in versions.items()),
+        'granted': all(
+            kind in latest and latest[kind].granted and latest[kind].version == version
+            for kind, version in versions.items()
+        ),
         'training_granted': 'training' in latest and latest['training'].granted,
     }

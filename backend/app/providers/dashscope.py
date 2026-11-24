@@ -3,6 +3,7 @@
 Externally unverified: live acceptance needs DASHSCOPE_API_KEY and a reachable
 image URL; the fake providers cover the local pipeline until then.
 """
+
 import asyncio
 import base64
 import json
@@ -26,13 +27,21 @@ class DashScopeImageProvider:
 
     async def edit(self, photo: bytes, prompt: str) -> GeneratedAsset:
         encoded = base64.b64encode(photo).decode()
-        payload = {'model': self.model,
-                   'input': {'messages': [{'role': 'user', 'content': [
-                       {'image': f'data:image/png;base64,{encoded}'}, {'text': prompt}]}]},
-                   'parameters': {'watermark': False}}
+        payload = {
+            'model': self.model,
+            'input': {
+                'messages': [
+                    {'role': 'user', 'content': [{'image': f'data:image/png;base64,{encoded}'}, {'text': prompt}]}
+                ]
+            },
+            'parameters': {'watermark': False},
+        }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(f'{DASHSCOPE_BASE}/services/aigc/multimodal-generation/generation',
-                                         json=payload, headers={'Authorization': f'Bearer {self.api_key}'})
+            response = await client.post(
+                f'{DASHSCOPE_BASE}/services/aigc/multimodal-generation/generation',
+                json=payload,
+                headers={'Authorization': f'Bearer {self.api_key}'},
+            )
             data = response.json()
             if response.status_code != 200:
                 raise DashScopeError(f'image edit failed: {data}')
@@ -55,11 +64,17 @@ class DashScopeLLMProvider:
         self.last_usage: dict | None = None
 
     async def chat(self, messages: list[dict], *, temperature: float = 0.3, max_tokens: int = 800) -> str:
-        payload = {'model': self.model, 'input': {'messages': messages},
-                   'parameters': {'result_format': 'message', 'temperature': temperature, 'max_tokens': max_tokens}}
+        payload = {
+            'model': self.model,
+            'input': {'messages': messages},
+            'parameters': {'result_format': 'message', 'temperature': temperature, 'max_tokens': max_tokens},
+        }
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
-            response = await client.post(f'{DASHSCOPE_BASE}/services/aigc/text-generation/generation',
-                                         json=payload, headers={'Authorization': f'Bearer {self.api_key}'})
+            response = await client.post(
+                f'{DASHSCOPE_BASE}/services/aigc/text-generation/generation',
+                json=payload,
+                headers={'Authorization': f'Bearer {self.api_key}'},
+            )
             data = response.json()
             if response.status_code != 200:
                 raise DashScopeError(f'llm chat failed: {data}')
@@ -85,12 +100,17 @@ class DashScopeAudioProvider:
         self.last_usage: dict | None = None
 
     async def interpret(self, audio_url: str, prompt: str) -> EmotionResult:
-        payload = {'model': self.model,
-                   'input': {'messages': [{'role': 'user', 'content': [{'audio': audio_url}, {'text': prompt}]}]},
-                   'parameters': {'result_format': 'message'}}
+        payload = {
+            'model': self.model,
+            'input': {'messages': [{'role': 'user', 'content': [{'audio': audio_url}, {'text': prompt}]}]},
+            'parameters': {'result_format': 'message'},
+        }
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
-            response = await client.post(f'{DASHSCOPE_BASE}/services/aigc/multimodal-generation/generation',
-                                         json=payload, headers={'Authorization': f'Bearer {self.api_key}'})
+            response = await client.post(
+                f'{DASHSCOPE_BASE}/services/aigc/multimodal-generation/generation',
+                json=payload,
+                headers={'Authorization': f'Bearer {self.api_key}'},
+            )
             data = response.json()
             if response.status_code != 200:
                 raise DashScopeError(f'audio interpret failed: {data}')
@@ -108,8 +128,14 @@ class DashScopeAudioProvider:
 
 
 class DashScopeVideoProvider:
-    def __init__(self, api_key: str, model: str = 'wanx2.1-i2v-turbo', timeout: float = 120,
-                 poll_seconds: float = 5, max_wait_seconds: float = 480):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = 'wanx2.1-i2v-turbo',
+        timeout: float = 120,
+        poll_seconds: float = 5,
+        max_wait_seconds: float = 480,
+    ):
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
@@ -119,12 +145,16 @@ class DashScopeVideoProvider:
     async def image_to_video(self, image: bytes, prompt: str, *, image_url=None) -> GeneratedAsset:
         if not image_url:
             raise DashScopeError('i2v requires a reachable image URL')
-        payload = {'model': self.model, 'input': {'img_url': image_url, 'prompt': prompt},
-                   'parameters': {'resolution': '720P', 'duration': 5, 'prompt_extend': True}}
+        payload = {
+            'model': self.model,
+            'input': {'img_url': image_url, 'prompt': prompt},
+            'parameters': {'resolution': '720P', 'duration': 5, 'prompt_extend': True},
+        }
         headers = {'Authorization': f'Bearer {self.api_key}', 'X-DashScope-Async': 'enable'}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            created = await client.post(f'{DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis',
-                                        json=payload, headers=headers)
+            created = await client.post(
+                f'{DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis', json=payload, headers=headers
+            )
             data = created.json()
             if created.status_code != 200:
                 raise DashScopeError(f'video submit failed: {data}')
@@ -132,8 +162,9 @@ class DashScopeVideoProvider:
             deadline = asyncio.get_event_loop().time() + self.max_wait_seconds
             while True:
                 await asyncio.sleep(self.poll_seconds)
-                polled = await client.get(f'{DASHSCOPE_BASE}/tasks/{task_id}',
-                                          headers={'Authorization': f'Bearer {self.api_key}'})
+                polled = await client.get(
+                    f'{DASHSCOPE_BASE}/tasks/{task_id}', headers={'Authorization': f'Bearer {self.api_key}'}
+                )
                 output = polled.json()['output']
                 if output['task_status'] == 'SUCCEEDED':
                     video = await client.get(output['video_url'])

@@ -1,5 +1,4 @@
 """Pet profile and consent request/response models."""
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,7 +22,7 @@ class PetProfile(PetInput):
 
     id: int
     # F02-2：体重不在档案手填，来自 F08 最新记录（T13）。
-    latest_weight: Optional[LatestWeight] = None
+    latest_weight: LatestWeight | None = None
 
 
 class TrainingConsent(BaseModel):

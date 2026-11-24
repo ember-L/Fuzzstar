@@ -1,4 +1,5 @@
 """T18: local non-AI latency sampling (methodology evidence, not a production claim)."""
+
 import unittest
 
 from scripts.latency_sample import ENDPOINTS, measure

@@ -7,12 +7,12 @@ from uuid import uuid4
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app import worker
 from app.core.security import utcnow
 from app.models import Base, MediaUpload, Pet, Task, User
-from app.services.tasks import claim_task, enqueue_task, finish_task
-from app.services.avatars import ACTIONS, generate_avatar
 from app.providers.fake import FakeImageProvider, FakeVideoProvider
-from app import worker
+from app.services.avatars import ACTIONS, generate_avatar
+from app.services.tasks import claim_task, enqueue_task, finish_task
 
 
 class FakeAssets:
@@ -48,6 +48,7 @@ class FakeRedis:
 
 def make_engine():
     from sqlalchemy.pool import StaticPool
+
     engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     return engine
@@ -58,9 +59,16 @@ def seed_task(engine, *, media_verified=True, pet_id=1):
         db.add(User(id=1, nickname='测试用户'))
         db.add(Pet(id=pet_id, user_id=1, name='团团', species='cat', status='active'))
         media_id = uuid4().hex
-        db.add(MediaUpload(id=media_id, pet_id=pet_id, content_type='image/png', size_bytes=9,
-                           expires_at=utcnow() + timedelta(minutes=10),
-                           version_id='version-1' if media_verified else None))
+        db.add(
+            MediaUpload(
+                id=media_id,
+                pet_id=pet_id,
+                content_type='image/png',
+                size_bytes=9,
+                expires_at=utcnow() + timedelta(minutes=10),
+                version_id='version-1' if media_verified else None,
+            )
+        )
         task = enqueue_task(db, pet_id, 'avatar_batch', media_id, {'media_id': media_id})
         return task.id, media_id
 
@@ -78,8 +86,9 @@ class GenerateAvatarTests(unittest.TestCase):
         with Session(self.engine) as db:
             task = db.get(Task, self.task_id)
             media = db.get(MediaUpload, self.media_id)
-            return asyncio.run(generate_avatar(task, media, assets=self.assets,
-                                               image_provider=self.image, video_provider=self.video))
+            return asyncio.run(
+                generate_avatar(task, media, assets=self.assets, image_provider=self.image, video_provider=self.video)
+            )
 
     def test_produces_base_and_seven_ready_clips(self):
         result = self.run_generate()
@@ -109,9 +118,13 @@ class GenerateAvatarTests(unittest.TestCase):
         class Broken:
             async def edit(self, photo, prompt):
                 raise RuntimeError('edit failed')
+
         with self.assertRaises(RuntimeError):
-            asyncio.run(generate_avatar(self._task(), self._media(), assets=self.assets,
-                                        image_provider=Broken(), video_provider=self.video))
+            asyncio.run(
+                generate_avatar(
+                    self._task(), self._media(), assets=self.assets, image_provider=Broken(), video_provider=self.video
+                )
+            )
 
     def _task(self):
         with Session(self.engine) as db:
@@ -127,8 +140,12 @@ class RunTaskTests(unittest.TestCase):
         self.engine = make_engine()
         self.addCleanup(self.engine.dispose)
         self.task_id, self.media_id = seed_task(self.engine)
-        self.ctx = {'engine': self.engine, 'assets': FakeAssets(),
-                    'image_provider': FakeImageProvider(), 'video_provider': FakeVideoProvider()}
+        self.ctx = {
+            'engine': self.engine,
+            'assets': FakeAssets(),
+            'image_provider': FakeImageProvider(),
+            'video_provider': FakeVideoProvider(),
+        }
 
     def status(self):
         with Session(self.engine) as db:
@@ -145,6 +162,7 @@ class RunTaskTests(unittest.TestCase):
         class Broken:
             async def edit(self, photo, prompt):
                 raise RuntimeError('edit failed')
+
         self.ctx['image_provider'] = Broken()
         for expected in (('pending', 1), ('pending', 2), ('failed', 3)):
             asyncio.run(worker.run_task(self.ctx, self.task_id))
@@ -161,8 +179,17 @@ class RunTaskTests(unittest.TestCase):
 
     def test_unknown_task_type_fails_after_retries(self):
         with Session(self.engine) as db, db.begin():
-            db.add(Task(id=uuid4().hex, pet_id=1, type='mystery', status='pending',
-                        request_key=uuid4().hex, payload={}, attempts=0))
+            db.add(
+                Task(
+                    id=uuid4().hex,
+                    pet_id=1,
+                    type='mystery',
+                    status='pending',
+                    request_key=uuid4().hex,
+                    payload={},
+                    attempts=0,
+                )
+            )
             mystery = db.scalars(select(Task).where(Task.type == 'mystery')).one().id
         for _ in range(3):
             asyncio.run(worker.run_task(self.ctx, mystery))
@@ -203,12 +230,28 @@ class SweepTests(unittest.TestCase):
     def test_cleans_expired_unverified_media_only(self):
         _, fresh_media = seed_task(self.engine)
         with Session(self.engine) as db, db.begin():
-            db.add(MediaUpload(id=uuid4().hex, pet_id=1, content_type='image/png', size_bytes=1,
-                               expires_at=utcnow() - timedelta(hours=2), version_id=None))
+            db.add(
+                MediaUpload(
+                    id=uuid4().hex,
+                    pet_id=1,
+                    content_type='image/png',
+                    size_bytes=1,
+                    expires_at=utcnow() - timedelta(hours=2),
+                    version_id=None,
+                )
+            )
             stale = db.scalars(select(MediaUpload).where(MediaUpload.version_id.is_(None))).all()
-            stale_id = [m.id for m in stale if m.id != fresh_media][0]
-            db.add(MediaUpload(id=uuid4().hex, pet_id=1, content_type='image/png', size_bytes=1,
-                               expires_at=utcnow() - timedelta(hours=2), version_id='version-9'))
+            stale_id = next(m.id for m in stale if m.id != fresh_media)
+            db.add(
+                MediaUpload(
+                    id=uuid4().hex,
+                    pet_id=1,
+                    content_type='image/png',
+                    size_bytes=1,
+                    expires_at=utcnow() - timedelta(hours=2),
+                    version_id='version-9',
+                )
+            )
         asyncio.run(worker.sweep(self.ctx))
         with Session(self.engine) as db:
             self.assertIsNone(db.get(MediaUpload, stale_id))
@@ -238,8 +281,14 @@ class RedisIntegrationTests(unittest.TestCase):
                     ctx['image_provider'] = FakeImageProvider()
                     ctx['video_provider'] = FakeVideoProvider()
 
-                await Worker([worker.run_task], redis_settings=settings, max_tries=1,
-                             burst=True, poll_delay=0.05, on_startup=on_startup).async_run()
+                await Worker(
+                    [worker.run_task],
+                    redis_settings=settings,
+                    max_tries=1,
+                    burst=True,
+                    poll_delay=0.05,
+                    on_startup=on_startup,
+                ).async_run()
             finally:
                 await pool.aclose()
 
@@ -254,6 +303,7 @@ class WorkerSettingsTests(unittest.TestCase):
     def test_concurrency_capped_at_two(self):
         # FRD 内测门槛：100 只宠物并发不雪崩，worker 并发限 2（FRD.md:357）。
         from app.worker import WorkerSettings
+
         self.assertEqual(WorkerSettings.max_jobs, 2)
         self.assertEqual(WorkerSettings.max_tries, 1)
 

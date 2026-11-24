@@ -1,9 +1,9 @@
 """T10 建议模块：模板加载、提示词构建、LLM 输出解析与禁词守卫。"""
+
 import unittest
 from pathlib import Path
 
-from app.services.advice import (AdviceError, build_advice_messages, load_advice_templates,
-                        parse_advice, template_advice)
+from app.services.advice import AdviceError, build_advice_messages, load_advice_templates, parse_advice, template_advice
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 
@@ -22,10 +22,15 @@ class TemplateTests(unittest.TestCase):
         self.assertIsNone(load_advice_templates(Path('/nonexistent-rules-dir')))
 
     def test_invalid_templates_raise(self):
-        import tempfile, yaml
+        import tempfile
+
+        import yaml
+
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'advice_templates.yaml'
-            path.write_text(yaml.safe_dump({'version': 'x', 'states': {'normal': {'text': 't', 'tips': ['a']}}}), encoding='utf-8')
+            path.write_text(
+                yaml.safe_dump({'version': 'x', 'states': {'normal': {'text': 't', 'tips': ['a']}}}), encoding='utf-8'
+            )
             with self.assertRaises(RuntimeError):
                 load_advice_templates(Path(tmp))
 
@@ -49,10 +54,23 @@ class TemplateTests(unittest.TestCase):
 
 class PromptTests(unittest.TestCase):
     def test_messages_contain_answers_and_constraints(self):
-        screening = {'state': 'observe', 'spirit': 'slightly_down', 'appetite': 'decreased',
-                     'rules_version': 'sx-2026-11-19+rl-2026-11-19'}
-        symptoms = [{'code': 'vomiting', 'label': '呕吐', 'duration': '2-12h', 'frequency': '2-3',
-                     'notes': '饭后吐', 'severe': False, 'grade': 'observe'}]
+        screening = {
+            'state': 'observe',
+            'spirit': 'slightly_down',
+            'appetite': 'decreased',
+            'rules_version': 'sx-2026-11-19+rl-2026-11-19',
+        }
+        symptoms = [
+            {
+                'code': 'vomiting',
+                'label': '呕吐',
+                'duration': '2-12h',
+                'frequency': '2-3',
+                'notes': '饭后吐',
+                'severe': False,
+                'grade': 'observe',
+            }
+        ]
         messages = build_advice_messages(screening, symptoms)
         self.assertEqual(messages[0]['role'], 'system')
         self.assertIn('确诊', messages[0]['content'])

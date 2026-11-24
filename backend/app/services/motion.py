@@ -2,14 +2,14 @@
 
 AI 能力由 providers/motion.py 注入；本层只做编排与校验，不判断动作语义、不调 LLM。
 """
+
 from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Optional
 
-from PIL import Image
 import yaml
+from PIL import Image
 
 from app.models import MediaUpload, Task
 
@@ -17,7 +17,7 @@ REQUIRED_KEYS = ('version', 'actions', 'prompts', 'health', 'gestures', 'max_sec
 MAX_SECONDS_CAP = 10
 
 
-def load_motion_config(rules_dir: Path) -> Optional[dict]:
+def load_motion_config(rules_dir: Path) -> dict | None:
     path = Path(rules_dir) / 'motion.yaml'
     if not path.is_file():
         return None
@@ -70,8 +70,7 @@ def verify_gif(data: bytes, *, max_seconds: float, max_height: int) -> dict:
         raise ValueError(f'GIF height {height} exceeds {max_height}')
     if loop != 0:
         raise ValueError('GIF must loop forever')
-    return {'width': width, 'height': height, 'frames': frames,
-            'duration_s': round(duration, 2), 'bytes': len(data)}
+    return {'width': width, 'height': height, 'frames': frames, 'duration_s': round(duration, 2), 'bytes': len(data)}
 
 
 async def generate_motion(task: Task, media: MediaUpload, *, config: dict, assets, provider) -> dict:
@@ -85,26 +84,36 @@ async def generate_motion(task: Task, media: MediaUpload, *, config: dict, asset
     for action in config['actions']:
         key = f'motions/{task.pet_id}/{task.id}/{action}.gif'
         try:
-            clip = await provider.animate(base.data, prompt=config['prompts'].get(action, action),
-                                          seconds=float(config['max_seconds']))
-            spec = verify_gif(clip.data, max_seconds=float(config['max_seconds']),
-                              max_height=int(config['height']))
+            clip = await provider.animate(
+                base.data, prompt=config['prompts'].get(action, action), seconds=float(config['max_seconds'])
+            )
+            spec = verify_gif(clip.data, max_seconds=float(config['max_seconds']), max_height=int(config['height']))
             version = await assets.write(key, clip.data, 'image/gif')
             gifs[action] = {'status': 'ready', 'key': key, 'version_id': version, **spec}
         except Exception:
             # F14-1：单条动图失败不阻断其余动作，客户端按动作粒度降级。
             gifs[action] = {'status': 'failed'}
     ready_count = sum(1 for gif in gifs.values() if gif['status'] == 'ready')
-    return {'base_image': {'key': base_key, 'version_id': base_version},
-            'gifs': gifs, 'ready_count': ready_count,
-            'usable': ready_count >= int(config['min_ready']),
-            'config_version': config['version']}
+    return {
+        'base_image': {'key': base_key, 'version_id': base_version},
+        'gifs': gifs,
+        'ready_count': ready_count,
+        'usable': ready_count >= int(config['min_ready']),
+        'config_version': config['version'],
+    }
 
 
 def motion_view(task: Task, config: dict, storage) -> dict:
     actions = config['actions']
-    payload = {'task_id': task.id, 'status': task.status, 'config_version': config['version'],
-               'base_image': None, 'gifs': {}, 'ready_count': 0, 'usable': False}
+    payload = {
+        'task_id': task.id,
+        'status': task.status,
+        'config_version': config['version'],
+        'base_image': None,
+        'gifs': {},
+        'ready_count': 0,
+        'usable': False,
+    }
     result = task.result if task.status == 'succeeded' else None
     if result is None:
         state = 'failed' if task.status == 'failed' else 'pending'
@@ -112,14 +121,20 @@ def motion_view(task: Task, config: dict, storage) -> dict:
         return payload
     base = result.get('base_image')
     if base:
-        payload['base_image'] = {'url': storage.asset_url(base['key'], base['version_id']),
-                                 'version_id': base['version_id']}
+        payload['base_image'] = {
+            'url': storage.asset_url(base['key'], base['version_id']),
+            'version_id': base['version_id'],
+        }
     for action in actions:
         gif = (result.get('gifs') or {}).get(action)
         if gif and gif.get('status') == 'ready':
-            payload['gifs'][action] = {'status': 'ready', 'url': storage.asset_url(gif['key'], gif['version_id']),
-                                       'version_id': gif['version_id'],
-                                       'duration_s': gif.get('duration_s'), 'bytes': gif.get('bytes')}
+            payload['gifs'][action] = {
+                'status': 'ready',
+                'url': storage.asset_url(gif['key'], gif['version_id']),
+                'version_id': gif['version_id'],
+                'duration_s': gif.get('duration_s'),
+                'bytes': gif.get('bytes'),
+            }
         else:
             payload['gifs'][action] = {'status': 'failed', 'url': None}
     payload['ready_count'] = result.get('ready_count', 0)

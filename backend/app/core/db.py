@@ -1,4 +1,5 @@
 """Request-scoped database session dependency."""
+
 from fastapi import Request
 from sqlalchemy.orm import Session
 

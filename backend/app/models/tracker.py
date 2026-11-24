@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,11 +17,11 @@ class DietRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     pet_id: Mapped[int] = mapped_column(ForeignKey('pets.id'), nullable=False)
     food_type: Mapped[str] = mapped_column(String(8), nullable=False)
-    food_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    food_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     amount_g: Mapped[float] = mapped_column(Numeric(7, 1), nullable=False)
-    kcal_est: Mapped[Optional[float]] = mapped_column(Numeric(7, 1), nullable=True)
+    kcal_est: Mapped[float | None] = mapped_column(Numeric(7, 1), nullable=True)
     fed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    note: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 

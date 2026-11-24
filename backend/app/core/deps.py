@@ -1,5 +1,4 @@
 """Shared FastAPI dependencies: authentication and consent gating."""
-from typing import Optional
 
 import jwt
 from fastapi import Depends, Request
@@ -15,14 +14,25 @@ from app.services.consents import consent_state
 from app.services.pets import PetNotFound, get_pet
 
 
-def _authenticate(request: Request, credentials: Optional[HTTPAuthorizationCredentials],
-                  db: Session, statuses: tuple[str, ...], *, allow_revoked: bool = False) -> User:
+def _authenticate(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    db: Session,
+    statuses: tuple[str, ...],
+    *,
+    allow_revoked: bool = False,
+) -> User:
     unauthorized = APIError(401, 'AUTH_REQUIRED', '请重新登录')
     if credentials is None:
         raise unauthorized
     try:
-        claims = jwt.decode(credentials.credentials, request.app.state.jwt_secret, algorithms=['HS256'],
-                            issuer='rongxing', options={'require': ['sub', 'sid', 'iat', 'exp', 'iss']})
+        claims = jwt.decode(
+            credentials.credentials,
+            request.app.state.jwt_secret,
+            algorithms=['HS256'],
+            issuer='rongxing',
+            options={'require': ['sub', 'sid', 'iat', 'exp', 'iss']},
+        )
     except jwt.ExpiredSignatureError as exc:
         raise APIError(401, 'TOKEN_EXPIRED', '会话已失效，请重新登录') from exc
     except jwt.InvalidTokenError as exc:
@@ -38,13 +48,15 @@ def _authenticate(request: Request, credentials: Optional[HTTPAuthorizationCrede
     return user
 
 
-def current_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-                 db: Session = Depends(get_db)) -> User:
+def current_user(
+    request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)
+) -> User:
     return _authenticate(request, credentials, db, ('active',))
 
 
-def deletion_user(request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-                  db: Session = Depends(get_db)) -> User:
+def deletion_user(
+    request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)
+) -> User:
     # A frozen account may still repeat its own deletion request (idempotent 200).
     return _authenticate(request, credentials, db, ('active', 'deletion_pending'), allow_revoked=True)
 
@@ -55,8 +67,7 @@ def consented_user(request: Request, user: User = Depends(current_user), db: Ses
     return user
 
 
-def admin_user(request: Request, user: User = Depends(current_user),
-               db: Session = Depends(get_db)) -> User:
+def admin_user(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
     """Require an account whose email is listed in ADMIN_EMAILS.
 
     Email verification is intentionally not required here: admins authenticate
@@ -66,9 +77,12 @@ def admin_user(request: Request, user: User = Depends(current_user),
     admins = request.app.state.admin_emails
     if not admins:
         raise APIError(503, 'ADMIN_NOT_CONFIGURED', '管理员后台尚未配置 ADMIN_EMAILS')
-    email = db.scalar(select(UserCredential.identifier).where(
-        UserCredential.user_id == user.id, UserCredential.type == 'email',
-    ))
+    email = db.scalar(
+        select(UserCredential.identifier).where(
+            UserCredential.user_id == user.id,
+            UserCredential.type == 'email',
+        )
+    )
     if email is None or email.lower() not in admins:
         raise APIError(403, 'ADMIN_REQUIRED', '当前账号没有管理员权限')
     return user

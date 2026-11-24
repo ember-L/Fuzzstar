@@ -1,4 +1,5 @@
 """Opt-in end-to-end check against a disposable, versioned S3 bucket."""
+
 import io
 import os
 import unittest
@@ -7,8 +8,8 @@ from uuid import uuid4
 import httpx
 from PIL import Image
 
-from app.services.media import PhotoStorage
 from app.models import MediaUpload
+from app.services.media import PhotoStorage
 
 
 @unittest.skipUnless(os.environ.get('MEDIA_S3_SMOKE') == '1', 'requires a disposable versioned S3 bucket')
@@ -24,8 +25,9 @@ class PhotoStorageSmokeTest(unittest.TestCase):
         upload = storage.presign(photo)
 
         def submit(payload):
-            return httpx.post(upload['url'], data=upload['fields'],
-                              files={'file': ('fixture.png', payload, 'image/png')}, timeout=10)
+            return httpx.post(
+                upload['url'], data=upload['fields'], files={'file': ('fixture.png', payload, 'image/png')}, timeout=10
+            )
 
         self.assertIn(submit(data + b'x' * 1024).status_code, (400, 403))
         submit(data).raise_for_status()

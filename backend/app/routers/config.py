@@ -1,8 +1,9 @@
 """版本化配置下发（ARCHITECTURE：GET /config/action-map、/config/motion）。"""
+
 from fastapi import APIRouter, Depends, Request, Response
 
-from app.core.errors import APIError
 from app.core.deps import consented_user
+from app.core.errors import APIError
 from app.routers.motion import public_config
 
 router = APIRouter(prefix='/api/v1/config', tags=['config'])

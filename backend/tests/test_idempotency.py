@@ -1,14 +1,15 @@
 """T14 浅离线幂等补发（FRD F07-5 / AC-07-5）：diet POST 可选 Idempotency-Key。"""
+
 from datetime import timedelta
 from unittest import TestCase
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
 from test_diet_api import DietFixture
+
 from app.core.security import utcnow
-from app.services.idempotency import IDEMPOTENCY_TTL, hash_request
 from app.models import RequestIdempotency
+from app.services.idempotency import IDEMPOTENCY_TTL, hash_request
 from app.worker import _sweep_db
 
 
@@ -45,7 +46,11 @@ class IdempotencyTests(DietFixture, TestCase):
         self.assertEqual(self.get_diet().json()['count'], 1)
 
     def test_same_key_different_pet_conflicts(self):
-        other_pet = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '圆圆'}).raise_for_status().json()['id']
+        other_pet = (
+            self.client.post('/api/v1/pets', headers=self.headers, json={'name': '圆圆'})
+            .raise_for_status()
+            .json()['id']
+        )
         self.post_key('key-1').raise_for_status()
         conflict = self.post_key('key-1', pet=other_pet)
         self.assertEqual(conflict.status_code, 409)
@@ -78,12 +83,17 @@ class IdempotencyTests(DietFixture, TestCase):
         pet = self.client.post('/api/v1/pets', headers=headers, json={'name': '别家猫'}).raise_for_status().json()['id']
         merged = dict(headers)
         merged['Idempotency-Key'] = 'key-1'
-        response = self.client.post(f'/api/v1/pets/{pet}/diet', headers=merged, json={'food_type': 'dry', 'amount_g': 50})
+        response = self.client.post(
+            f'/api/v1/pets/{pet}/diet', headers=merged, json={'food_type': 'dry', 'amount_g': 50}
+        )
         self.assertEqual(response.status_code, 201)
 
     def test_unauthorized_rejected(self):
-        response = self.client.post(f'/api/v1/pets/{self.pet}/diet',
-                                    headers={'Idempotency-Key': 'key-1'}, json={'food_type': 'dry', 'amount_g': 50})
+        response = self.client.post(
+            f'/api/v1/pets/{self.pet}/diet',
+            headers={'Idempotency-Key': 'key-1'},
+            json={'food_type': 'dry', 'amount_g': 50},
+        )
         self.assertEqual(response.status_code, 401)
 
     def test_hash_is_path_and_body_sensitive(self):

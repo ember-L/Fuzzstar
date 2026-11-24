@@ -4,10 +4,10 @@
 禁词（确诊/治疗/诊断）或解析失败抛 ChatReplyError，由 API 降级模板安抚。
 红线关键词命中走 redline_response：零 LLM、附就医引导卡（附录 F 文案）。
 """
+
 import json
 import re
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -25,7 +25,7 @@ class ChatReplyError(ValueError):
     """LLM 输出不可用（格式错误或含禁词），应降级模板。"""
 
 
-def load_chat_config(directory: Path) -> Optional[dict]:
+def load_chat_config(directory: Path) -> dict | None:
     path = Path(directory) / 'chat.yaml'
     if not path.is_file():
         return None
@@ -38,7 +38,11 @@ def load_chat_config(directory: Path) -> Optional[dict]:
             if not isinstance(data[key], int) or data[key] <= 0:
                 raise ValueError(f'{key} must be a positive integer')
         keywords = data['redline_keywords']
-        if not isinstance(keywords, list) or not keywords or not all(isinstance(k, str) and k.strip() for k in keywords):
+        if (
+            not isinstance(keywords, list)
+            or not keywords
+            or not all(isinstance(k, str) and k.strip() for k in keywords)
+        ):
             raise ValueError('redline_keywords must be a non-empty string list')
         for key in ('disclaimer', 'fallback_reply', 'redline_reply'):
             value = data[key]
@@ -60,14 +64,22 @@ def load_chat_config(directory: Path) -> Optional[dict]:
             value = data[key]
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f'{key} must be non-empty')
-        return {'version': version, 'context_window': data['context_window'],
-                'input_max': data['input_max'], 'reply_max': data['reply_max'],
-                'disclaimer': data['disclaimer'], 'redline_keywords': list(keywords),
-                'fallback_reply': data['fallback_reply'], 'redline_reply': data['redline_reply'],
-                'audio_confidence_threshold': float(threshold),
-                'audio_min_seconds': data['audio_min_seconds'], 'audio_max_seconds': data['audio_max_seconds'],
-                'unrecognized_label': data['unrecognized_label'], 'audio_footer': data['audio_footer'],
-                'audio_fallback_reply': data['audio_fallback_reply']}
+        return {
+            'version': version,
+            'context_window': data['context_window'],
+            'input_max': data['input_max'],
+            'reply_max': data['reply_max'],
+            'disclaimer': data['disclaimer'],
+            'redline_keywords': list(keywords),
+            'fallback_reply': data['fallback_reply'],
+            'redline_reply': data['redline_reply'],
+            'audio_confidence_threshold': float(threshold),
+            'audio_min_seconds': data['audio_min_seconds'],
+            'audio_max_seconds': data['audio_max_seconds'],
+            'unrecognized_label': data['unrecognized_label'],
+            'audio_footer': data['audio_footer'],
+            'audio_fallback_reply': data['audio_fallback_reply'],
+        }
     except Exception as exc:
         raise RuntimeError(f'Invalid chat config: {path}') from exc
 
@@ -77,39 +89,38 @@ def detect_redline(text: str, config: dict) -> bool:
 
 
 def pet_profile_lines(pet: dict) -> list[str]:
-    profile = [f"名字:{pet['name']}", f"种类:{pet.get('species') or 'cat'}"]
+    profile = [f'名字:{pet["name"]}', f'种类:{pet.get("species") or "cat"}']
     if pet.get('breed'):
-        profile.append(f"品种:{pet['breed']}")
-    profile.append(f"性别:{_SEX_LABELS.get(pet.get('sex'), '小朋友')}")
+        profile.append(f'品种:{pet["breed"]}')
+    profile.append(f'性别:{_SEX_LABELS.get(pet.get("sex"), "小朋友")}')
     if pet.get('age_months') is not None:
-        profile.append(f"月龄:{pet['age_months']}个月")
+        profile.append(f'月龄:{pet["age_months"]}个月')
     profile.append('已绝育' if pet.get('neutered') else '未绝育')
     if pet.get('body_type'):
-        profile.append(f"体型:{_BODY_LABELS.get(pet['body_type'], pet['body_type'])}")
+        profile.append(f'体型:{_BODY_LABELS.get(pet["body_type"], pet["body_type"])}')
     return profile
 
 
-def persona_tone(screening_state: Optional[str]) -> str:
+def persona_tone(screening_state: str | None) -> str:
     if screening_state in _SICK_STATES:
         return '你最近身体不适(最新初筛提示需要关注),回复要体现不舒服、蔫蔫的语气,可以提到自己没精神或肚子不舒服,但绝不能说出具体病名或做医学判断。'
     return '你最近状态不错,回复活泼亲人。'
 
 
-def build_persona_messages(pet: dict, screening_state: Optional[str], history: list[dict], config: dict) -> list[dict]:
+def build_persona_messages(pet: dict, screening_state: str | None, history: list[dict], config: dict) -> list[dict]:
     """system 人设 + 最近上下文（history 已按窗口截取，role=user/pet）。"""
     profile = pet_profile_lines(pet)
     tone = persona_tone(screening_state)
     system = (
-        f"你扮演一只宠物猫,以第一人称和主人撒娇聊天。档案:{'、'.join(profile)}。{tone}"
-        f"只聊日常陪伴与感受,不做诊断、不开处方、不推荐药物;回复严禁出现「确诊」「治疗」「诊断」字样。"
-        f"回复不超过{config['reply_max']}字。"
-        f"仅输出 JSON:{{\"reply\": \"一句人设回复\", \"emotion\": \"happy/relaxed/annoyed/fearful/painful/seeking_attention 之一\"}}。"
-        f"免责边界:{config['disclaimer']}。"
+        f'你扮演一只宠物猫,以第一人称和主人撒娇聊天。档案:{"、".join(profile)}。{tone}'
+        f'只聊日常陪伴与感受,不做诊断、不开处方、不推荐药物;回复严禁出现「确诊」「治疗」「诊断」字样。'
+        f'回复不超过{config["reply_max"]}字。'
+        f'仅输出 JSON:{{"reply": "一句人设回复", "emotion": "happy/relaxed/annoyed/fearful/painful/seeking_attention 之一"}}。'
+        f'免责边界:{config["disclaimer"]}。'
     )
     messages = [{'role': 'system', 'content': system}]
     for item in history:
-        messages.append({'role': 'user' if item['role'] == 'user' else 'assistant',
-                         'content': item['content'] or ''})
+        messages.append({'role': 'user' if item['role'] == 'user' else 'assistant', 'content': item['content'] or ''})
     return messages
 
 
@@ -127,7 +138,7 @@ def parse_chat_reply(raw: str, config: dict) -> dict:
     emotion = data.get('emotion')
     if emotion not in EMOTIONS:
         emotion = 'relaxed'
-    return {'reply': reply.strip()[:config['reply_max']], 'emotion': emotion}
+    return {'reply': reply.strip()[: config['reply_max']], 'emotion': emotion}
 
 
 def fallback_reply(config: dict) -> dict:
@@ -135,5 +146,9 @@ def fallback_reply(config: dict) -> dict:
 
 
 def redline_response(config: dict) -> dict:
-    return {'reply': config['redline_reply'], 'emotion': 'painful', 'source': 'template',
-            'guidance': {'title': '建议立即就医', 'text': REDLINE_SUBTITLE, 'route': 'screening'}}
+    return {
+        'reply': config['redline_reply'],
+        'emotion': 'painful',
+        'source': 'template',
+        'guidance': {'title': '建议立即就医', 'text': REDLINE_SUBTITLE, 'route': 'screening'},
+    }

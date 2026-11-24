@@ -4,6 +4,7 @@ Run with: REDIS_URL=... DATABASE_URL=... DASHSCOPE_API_KEY=... MEDIA_S3_*... arq
 The DB tasks table is the source of truth; the sweep dispatches pending tasks and
 reclaims expired leases every 5 seconds, so a Redis outage never loses a task.
 """
+
 import asyncio
 import os
 from datetime import timedelta
@@ -14,18 +15,18 @@ from arq.connections import RedisSettings
 from sqlalchemy import create_engine, delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.env import load_env
+from app.core.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
+from app.core.security import utcnow
+from app.models import MediaUpload, QuotaDenial, RequestIdempotency, Task
+from app.providers.motion import provider_from_env
 from app.services.advice import analyze_screening, apply_template_fallback, load_advice_templates, record_llm_failure
 from app.services.audio import interpret_audio
-from app.core.env import load_env
-from app.core.security import utcnow
-from app.services.chat import load_chat_config
 from app.services.avatars import S3Assets, generate_avatar
+from app.services.chat import load_chat_config
 from app.services.gif import export_gif
-from app.services.motion import generate_motion, load_motion_config
-from app.providers.motion import provider_from_env
 from app.services.idempotency import IDEMPOTENCY_TTL
-from app.models import MediaUpload, QuotaDenial, RequestIdempotency, Task
-from app.core.observability import QUOTA_DENIAL_RETENTION_DAYS, log_task_event
+from app.services.motion import generate_motion, load_motion_config
 from app.services.privacy import purge_due
 from app.services.tasks import MAX_ATTEMPTS, claim_task, finish_task
 from app.services.triage import load_rules
@@ -48,7 +49,9 @@ def _finish(engine, task_id, attempt, result):
 def _load(engine, task_id):
     with Session(engine) as db:
         task = db.get(Task, task_id)
-        media = db.get(MediaUpload, task.payload.get('media_id')) if task.type in ('avatar_batch', 'motion_batch') else None
+        media = (
+            db.get(MediaUpload, task.payload.get('media_id')) if task.type in ('avatar_batch', 'motion_batch') else None
+        )
         return task, media
 
 
@@ -61,20 +64,36 @@ async def run_task(ctx, task_id):
         task, media = await asyncio.to_thread(_load, ctx['engine'], task_id)
         log_task_event('claimed', task_id=task.id, task_type=task.type, attempts=attempt)
         if task.type == 'avatar_batch':
-            result = await generate_avatar(task, media, assets=ctx['assets'],
-                                           image_provider=ctx['image_provider'], video_provider=ctx['video_provider'])
+            result = await generate_avatar(
+                task,
+                media,
+                assets=ctx['assets'],
+                image_provider=ctx['image_provider'],
+                video_provider=ctx['video_provider'],
+            )
         elif task.type == 'screening_analysis':
-            result = await analyze_screening(ctx['engine'], task, llm_provider=ctx['llm_provider'],
-                                             templates=ctx['advice_templates'], rules=ctx.get('triage_rules'))
+            result = await analyze_screening(
+                ctx['engine'],
+                task,
+                llm_provider=ctx['llm_provider'],
+                templates=ctx['advice_templates'],
+                rules=ctx.get('triage_rules'),
+            )
         elif task.type == 'audio_interpret':
-            result = await interpret_audio(ctx['engine'], task, audio_provider=ctx.get('audio_provider'),
-                                           llm_provider=ctx['llm_provider'], assets=ctx['assets'],
-                                           chat_config=ctx['chat_config'])
+            result = await interpret_audio(
+                ctx['engine'],
+                task,
+                audio_provider=ctx.get('audio_provider'),
+                llm_provider=ctx['llm_provider'],
+                assets=ctx['assets'],
+                chat_config=ctx['chat_config'],
+            )
         elif task.type == 'gif_export':
             result = await export_gif(task, assets=ctx['assets'])
         elif task.type == 'motion_batch':
-            result = await generate_motion(task, media, config=ctx['motion_config'], assets=ctx['assets'],
-                                           provider=ctx['motion_provider'])
+            result = await generate_motion(
+                task, media, config=ctx['motion_config'], assets=ctx['assets'], provider=ctx['motion_provider']
+            )
         else:
             raise ValueError(f'unsupported task type: {task.type}')
     except Exception:
@@ -83,8 +102,13 @@ async def run_task(ctx, task_id):
             if attempt >= MAX_ATTEMPTS:
                 await asyncio.to_thread(apply_template_fallback, ctx['engine'], task_id, ctx['advice_templates'])
         await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, None)
-        log_task_event('failed', task_id=task_id, task_type=task.type if task else 'unknown',
-                       attempts=attempt, status='failed' if attempt >= MAX_ATTEMPTS else 'retry')
+        log_task_event(
+            'failed',
+            task_id=task_id,
+            task_type=task.type if task else 'unknown',
+            attempts=attempt,
+            status='failed' if attempt >= MAX_ATTEMPTS else 'retry',
+        )
         return
     await asyncio.to_thread(_finish, ctx['engine'], task_id, attempt, result)
     log_task_event('finished', task_id=task_id, task_type=task.type, attempts=attempt, status='succeeded')
@@ -93,21 +117,29 @@ async def run_task(ctx, task_id):
 def _sweep_db(engine):
     now = utcnow()
     with Session(engine) as db, db.begin():
-        rows = db.scalars(select(Task).where(or_(
-            Task.status == 'pending',
-            (Task.status == 'running') & (Task.lease_until <= now),
-        ))).all()
+        rows = db.scalars(
+            select(Task).where(
+                or_(
+                    Task.status == 'pending',
+                    (Task.status == 'running') & (Task.lease_until <= now),
+                )
+            )
+        ).all()
         dispatch = []
         for task in rows:
             if task.status == 'running' and task.attempts >= MAX_ATTEMPTS:
                 claim_task(db, task.id, now=now)  # exhausted lease -> failed
             else:
                 dispatch.append(task.id)
-        db.execute(delete(MediaUpload).where(MediaUpload.version_id.is_(None),
-                                             MediaUpload.expires_at <= now - MEDIA_CLEANUP_GRACE))
+        db.execute(
+            delete(MediaUpload).where(
+                MediaUpload.version_id.is_(None), MediaUpload.expires_at <= now - MEDIA_CLEANUP_GRACE
+            )
+        )
         db.execute(delete(RequestIdempotency).where(RequestIdempotency.created_at <= now - IDEMPOTENCY_TTL))
-        db.execute(delete(QuotaDenial).where(
-            QuotaDenial.created_at <= now - timedelta(days=QUOTA_DENIAL_RETENTION_DAYS)))
+        db.execute(
+            delete(QuotaDenial).where(QuotaDenial.created_at <= now - timedelta(days=QUOTA_DENIAL_RETENTION_DAYS))
+        )
         return dispatch
 
 
@@ -124,6 +156,7 @@ async def purge_sweep(ctx):
 
 def _providers_from_env():
     from app.providers.dashscope import DashScopeImageProvider, DashScopeLLMProvider, DashScopeVideoProvider
+
     key = os.environ.get('DASHSCOPE_API_KEY', '')
     if not key:
         raise RuntimeError('DASHSCOPE_API_KEY is required for the worker')
@@ -131,8 +164,9 @@ def _providers_from_env():
 
 
 async def startup(ctx):
-    ctx['engine'] = create_engine(os.environ['DATABASE_URL'], hide_parameters=True,
-                                  pool_pre_ping=True, pool_recycle=1800)
+    ctx['engine'] = create_engine(
+        os.environ['DATABASE_URL'], hide_parameters=True, pool_pre_ping=True, pool_recycle=1800
+    )
     assets = S3Assets.from_env()
     if assets is None:
         raise RuntimeError('MEDIA_S3_* settings are required for the worker')
@@ -153,6 +187,7 @@ async def startup(ctx):
         raise RuntimeError('chat.yaml is required for audio interpretation')
     ctx['chat_config'] = chat_config
     from app.providers.dashscope import DashScopeAudioProvider
+
     ctx['audio_provider'] = DashScopeAudioProvider(os.environ['DASHSCOPE_API_KEY'])
 
 

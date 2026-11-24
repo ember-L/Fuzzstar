@@ -1,10 +1,11 @@
 """T13 体重记录、趋势与骤变提示（FRD F08-1/2，F02-2）。"""
+
 from datetime import timedelta
 from unittest import TestCase
 
 from sqlalchemy.orm import Session
-
 from test_auth_api import AuthAPIFixture
+
 from app.core.security import utcnow
 from app.models import WeightRecord
 from app.services.weights import detect_sudden_change
@@ -53,16 +54,26 @@ class WeightFixture(AuthAPIFixture):
     def setUp(self):
         super().setUp()
         self.headers = {'Authorization': 'Bearer ' + self.login().json()['access_token']}
-        self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
-        self.pet = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).raise_for_status().json()['id']
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
+        self.pet = (
+            self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'})
+            .raise_for_status()
+            .json()['id']
+        )
 
     def post_weight(self, body, pet=None, headers=None):
-        return self.client.post(f'/api/v1/pets/{pet or self.pet}/weights',
-                                headers=self.headers if headers is None else headers, json=body)
+        return self.client.post(
+            f'/api/v1/pets/{pet or self.pet}/weights', headers=self.headers if headers is None else headers, json=body
+        )
 
     def get_weights(self, pet=None, headers=None, **params):
-        return self.client.get(f'/api/v1/pets/{pet or self.pet}/weights',
-                               headers=self.headers if headers is None else headers, params=params)
+        return self.client.get(
+            f'/api/v1/pets/{pet or self.pet}/weights',
+            headers=self.headers if headers is None else headers,
+            params=params,
+        )
 
     def make_weight(self, kg, measured_at=None, pet=None):
         with Session(self.engine) as db:
@@ -73,13 +84,16 @@ class WeightFixture(AuthAPIFixture):
 
     def other_headers(self, consent=True):
         from app.services.identity import create_email_account, verify_email
+
         with Session(self.engine) as db:
             token = create_email_account(db, 'other@example.com', self.password, self.now)
             verify_email(db, token, self.now)
             db.commit()
         headers = {'Authorization': 'Bearer ' + self.login(email='other@example.com').json()['access_token']}
         if consent:
-            self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+            self.client.post(
+                '/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}
+            ).raise_for_status()
         return headers
 
 
@@ -89,6 +103,7 @@ class WeightAPITests(WeightFixture, TestCase):
         self.assertEqual(data['weight_kg'], 4.25)
         self.assertIsInstance(data['id'], int)
         from datetime import datetime
+
         measured = datetime.fromisoformat(data['measured_at'])
         self.assertLess(abs((utcnow() - measured).total_seconds()), 120)
 
@@ -121,7 +136,9 @@ class WeightAPITests(WeightFixture, TestCase):
         resp = self.post_weight({'weight_kg': 4.0, 'measured_at': (utcnow() + timedelta(minutes=5)).isoformat()})
         self.assertEqual(resp.status_code, 400)
         self.assertIn('measured_at', [f['field'] for f in resp.json()['detail']['fields']])
-        self.post_weight({'weight_kg': 4.0, 'measured_at': (utcnow() + timedelta(seconds=30)).isoformat()}).raise_for_status()
+        self.post_weight(
+            {'weight_kg': 4.0, 'measured_at': (utcnow() + timedelta(seconds=30)).isoformat()}
+        ).raise_for_status()
 
     def test_same_day_multiple_all_kept(self):
         for kg in (4.0, 4.1, 4.2):
@@ -148,7 +165,9 @@ class WeightAPITests(WeightFixture, TestCase):
         self.assertIsNone(trend['alert'])
 
     def test_ac_08_1_profile_and_feeding_update_immediately(self):
-        self.assertIsNone(self.client.get(f'/api/v1/pets/{self.pet}', headers=self.headers).raise_for_status().json()['latest_weight'])
+        self.assertIsNone(
+            self.client.get(f'/api/v1/pets/{self.pet}', headers=self.headers).raise_for_status().json()['latest_weight']
+        )
         self.post_weight({'weight_kg': 4.25}).raise_for_status()
         profile = self.client.get(f'/api/v1/pets/{self.pet}', headers=self.headers).raise_for_status().json()
         self.assertEqual(profile['latest_weight']['weight_kg'], 4.25)
@@ -156,18 +175,28 @@ class WeightAPITests(WeightFixture, TestCase):
         self.assertEqual(listing[0]['latest_weight']['weight_kg'], 4.25)
         health = self.client.get(f'/api/v1/pets/{self.pet}/health', headers=self.headers).raise_for_status().json()
         self.assertEqual(health['latest_weight']['weight_kg'], 4.25)
-        reference = self.client.get(f'/api/v1/pets/{self.pet}/feeding-reference', headers=self.headers).raise_for_status().json()
+        reference = (
+            self.client.get(f'/api/v1/pets/{self.pet}/feeding-reference', headers=self.headers)
+            .raise_for_status()
+            .json()
+        )
         self.assertTrue(reference['has_weight'])
         self.assertEqual(reference['weight_kg'], 4.25)
         self.assertGreater(reference['der_kcal'], 0)
 
     def test_patch_preserves_latest_weight(self):
         self.post_weight({'weight_kg': 4.25}).raise_for_status()
-        profile = self.client.patch(f'/api/v1/pets/{self.pet}', headers=self.headers, json={'name': '圆圆'}).raise_for_status().json()
+        profile = (
+            self.client.patch(f'/api/v1/pets/{self.pet}', headers=self.headers, json={'name': '圆圆'})
+            .raise_for_status()
+            .json()
+        )
         self.assertEqual(profile['latest_weight']['weight_kg'], 4.25)
 
     def test_ac_08_2_loss_alert_suggests_screening(self):
-        self.post_weight({'weight_kg': 4.0, 'measured_at': (utcnow() - timedelta(days=6)).isoformat()}).raise_for_status()
+        self.post_weight(
+            {'weight_kg': 4.0, 'measured_at': (utcnow() - timedelta(days=6)).isoformat()}
+        ).raise_for_status()
         self.post_weight({'weight_kg': 3.5}).raise_for_status()
         alert = self.get_weights().raise_for_status().json()['trend']['alert']
         self.assertEqual(alert['direction'], 'loss')

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class ImageProvider(Protocol):
 
 
 class VideoProvider(Protocol):
-    async def image_to_video(self, image: bytes, prompt: str, *, image_url: Optional[str] = None) -> GeneratedAsset: ...
+    async def image_to_video(self, image: bytes, prompt: str, *, image_url: str | None = None) -> GeneratedAsset: ...
 
 
 class LLMProvider(Protocol):

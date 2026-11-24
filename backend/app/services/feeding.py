@@ -2,9 +2,9 @@
 
 系数与密度来自 rules/feeding.yaml（可调）；输出一律携带「参考值,非医嘱」尾注。
 """
+
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -14,7 +14,7 @@ COEFFICIENT_KEYS = ('kitten_under_4m', 'kitten_4_12m', 'adult_neutered', 'adult_
 FOOD_TYPES = ('dry', 'wet', 'snack', 'other')
 
 
-def load_feeding_config(directory: Path) -> Optional[dict]:
+def load_feeding_config(directory: Path) -> dict | None:
     path = directory / 'feeding.yaml'
     if not path.is_file():
         return None
@@ -45,7 +45,7 @@ def load_feeding_config(directory: Path) -> Optional[dict]:
     return data
 
 
-def kcal_estimate(config: dict, food_type: str, amount_g: float) -> Optional[float]:
+def kcal_estimate(config: dict, food_type: str, amount_g: float) -> float | None:
     density = config['densities'].get(food_type)
     if density is None:
         return None
@@ -59,7 +59,7 @@ def _calendar_months(birth: date, now: datetime) -> int:
     return months
 
 
-def life_stage(birth_date: Optional[date], neutered: bool, *, now: datetime) -> str:
+def life_stage(birth_date: date | None, neutered: bool, *, now: datetime) -> str:
     if birth_date is not None:
         months = _calendar_months(birth_date, now)
         if months < 4:
@@ -71,7 +71,9 @@ def life_stage(birth_date: Optional[date], neutered: bool, *, now: datetime) -> 
     return 'adult_neutered' if neutered else 'adult_intact'
 
 
-def feeding_reference(config: dict, *, weight_kg: float, birth_date: Optional[date], neutered: bool, now: datetime) -> dict:
+def feeding_reference(
+    config: dict, *, weight_kg: float, birth_date: date | None, neutered: bool, now: datetime
+) -> dict:
     stage = life_stage(birth_date, neutered, now=now)
     coefficient = config['coefficients'][stage]
     rer = config['rer_factor'] * (weight_kg ** config['rer_exponent'])

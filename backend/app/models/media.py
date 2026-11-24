@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,7 +19,7 @@ class MediaUpload(Base):
     content_type: Mapped[str] = mapped_column(String(16), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    version_id: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    version_id: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     @property
     def object_key(self) -> str:

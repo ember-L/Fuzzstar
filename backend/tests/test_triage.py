@@ -8,8 +8,12 @@ RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 
 
 def answers(spirit='normal', appetite='normal', symptoms=(), redline_options=()):
-    return {'spirit': spirit, 'appetite': appetite,
-            'symptoms': [dict(s) for s in symptoms], 'redline_options': list(redline_options)}
+    return {
+        'spirit': spirit,
+        'appetite': appetite,
+        'symptoms': [dict(s) for s in symptoms],
+        'redline_options': list(redline_options),
+    }
 
 
 def symptom(code, duration='2-12h', **kw):
@@ -34,7 +38,9 @@ class RuleLoaderTests(unittest.TestCase):
             root = Path(tmp)
             (root / 'symptoms.yaml').write_text('version: sx-x\nsymptoms: []\n', encoding='utf-8')
             (root / 'redlines.yaml').write_text('version: rl-x\nredlines: []\n', encoding='utf-8')
-            (root / 'scoring.yaml').write_text('version: sc-x\ndeltas: {observe: 10, vet: 30, urgent: 60}\n', encoding='utf-8')
+            (root / 'scoring.yaml').write_text(
+                'version: sc-x\ndeltas: {observe: 10, vet: 30, urgent: 60}\n', encoding='utf-8'
+            )
             with self.assertRaises(RuntimeError):
                 load_rules(root)
 
@@ -107,8 +113,9 @@ class GradingTests(unittest.TestCase):
                 self.assertEqual(result['state'], expected)
 
     def test_diarrhea_with_spirit_down_escalates(self):
-        result = self.grade(answers(spirit='slightly_down',
-                                    symptoms=[symptom('diarrhea', duration='<2h', frequency='1')]))
+        result = self.grade(
+            answers(spirit='slightly_down', symptoms=[symptom('diarrhea', duration='<2h', frequency='1')])
+        )
         self.assertEqual(result['state'], 'vet')
 
     def test_feverish_with_appetite_down_escalates(self):
@@ -116,10 +123,14 @@ class GradingTests(unittest.TestCase):
         self.assertEqual(result['state'], 'vet')
 
     def test_multiple_symptoms_take_highest(self):
-        result = self.grade(answers(symptoms=[
-            symptom('vomiting', duration='<2h', frequency='1'),
-            symptom('limping', duration='>24h'),
-        ]))
+        result = self.grade(
+            answers(
+                symptoms=[
+                    symptom('vomiting', duration='<2h', frequency='1'),
+                    symptom('limping', duration='>24h'),
+                ]
+            )
+        )
         self.assertEqual(result['state'], 'vet')
         self.assertEqual(result['symptom_grades'], {'vomiting': 'observe', 'limping': 'vet'})
 
@@ -184,8 +195,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(self.fields(answers(symptoms=[symptom('limping')])), [])
 
     def test_notes_limit_and_unknown_codes(self):
-        payload = answers(symptoms=[symptom('limping', notes='x' * 256), symptom('nope')],
-                          redline_options=['bogus'])
+        payload = answers(symptoms=[symptom('limping', notes='x' * 256), symptom('nope')], redline_options=['bogus'])
         fields = self.fields(payload)
         self.assertIn('symptoms[0].notes', fields)
         self.assertIn('symptoms[1].code', fields)

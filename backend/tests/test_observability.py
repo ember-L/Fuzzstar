@@ -1,4 +1,5 @@
 """T18: structured access/worker/quota logs, redaction and denial audit."""
+
 import asyncio
 import json
 import logging
@@ -8,12 +9,12 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from app.core.security import utcnow
-from app.models import ChatMessage, QuotaDenial
-from app.core.observability import log_task_event
 from test_auth_api import AuthAPIFixture
 from test_worker import FakeAssets, FakeImageProvider, FakeVideoProvider, make_engine, seed_task
+
+from app.core.observability import log_task_event
+from app.core.security import utcnow
+from app.models import ChatMessage, QuotaDenial
 
 
 class LogCapture:
@@ -91,8 +92,11 @@ class QuotaDenialAuditTests(AuthAPIFixture, unittest.TestCase):
         self.session_id = session['session_id']
 
     def send(self, text):
-        return self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                json={'kind': 'text', 'content': text}, headers=self.headers)
+        return self.client.post(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            json={'kind': 'text', 'content': text},
+            headers=self.headers,
+        )
 
     def test_denial_persisted_despite_business_rollback(self):
         with patch.dict(os.environ, {'QUOTA_CHAT': '1'}):
@@ -133,13 +137,18 @@ class WorkerEventLogTests(unittest.TestCase):
 
     def test_run_task_emits_claimed_and_finished(self):
         from app.worker import run_task
+
         engine = make_engine()
         self.addCleanup(engine.dispose)
         task_id, _ = seed_task(engine)
         capture = LogCapture('rongxing.worker')
         self.addCleanup(capture.close)
-        ctx = {'engine': engine, 'assets': FakeAssets(),
-               'image_provider': FakeImageProvider(), 'video_provider': FakeVideoProvider()}
+        ctx = {
+            'engine': engine,
+            'assets': FakeAssets(),
+            'image_provider': FakeImageProvider(),
+            'video_provider': FakeVideoProvider(),
+        }
         asyncio.run(run_task(ctx, task_id))
         events = [entry['event'] for entry in capture.parsed()]
         self.assertIn('claimed', events)

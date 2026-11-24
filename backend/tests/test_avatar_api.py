@@ -4,42 +4,54 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
-from app.services.identity import create_email_account, verify_email
 from app.models import MediaUpload, Task
+from app.services.identity import create_email_account, verify_email
 from app.services.tasks import claim_task, finish_task
-from test_auth_api import AuthAPIFixture
 
 
 class AvatarAPITests(AuthAPIFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
-        self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
         self.pet_id = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).json()['id']
 
     def make_media(self, pet_id=None, verified=True):
         media_id = uuid4().hex
         with Session(self.engine) as db, db.begin():
-            db.add(MediaUpload(id=media_id, pet_id=pet_id if pet_id is not None else self.pet_id,
-                               content_type='image/png', size_bytes=1024,
-                               expires_at=utcnow() + timedelta(minutes=10),
-                               version_id='version-1' if verified else None))
+            db.add(
+                MediaUpload(
+                    id=media_id,
+                    pet_id=pet_id if pet_id is not None else self.pet_id,
+                    content_type='image/png',
+                    size_bytes=1024,
+                    expires_at=utcnow() + timedelta(minutes=10),
+                    version_id='version-1' if verified else None,
+                )
+            )
         return media_id
 
     def submit(self, media_id, pet_id=None, headers=None):
-        return self.client.post(f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/avatar',
-                                json={'media_id': media_id},
-                                headers=self.headers if headers is None else headers)
+        return self.client.post(
+            f'/api/v1/pets/{pet_id if pet_id is not None else self.pet_id}/avatar',
+            json={'media_id': media_id},
+            headers=self.headers if headers is None else headers,
+        )
 
     def verified_account(self, email, consent=True):
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, email, self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login(email).json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login(email).json()["access_token"]}'}
         if consent:
-            self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+            self.client.post(
+                '/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}
+            ).raise_for_status()
         return headers
 
     def test_requires_login(self):
@@ -78,8 +90,9 @@ class AvatarAPITests(AuthAPIFixture, unittest.TestCase):
 
     def test_invalid_body_is_rejected(self):
         self.assertEqual(self.submit('not-a-media-id').status_code, 400)
-        response = self.client.post(f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers,
-                                    json={'media_id': self.make_media(), 'extra': 1})
+        response = self.client.post(
+            f'/api/v1/pets/{self.pet_id}/avatar', headers=self.headers, json={'media_id': self.make_media(), 'extra': 1}
+        )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()['code'], 'VALIDATION_ERROR')
 
@@ -93,8 +106,10 @@ class AvatarAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(body['status'], 'pending')
         with Session(self.engine) as db:
             task = db.get(Task, body['task_id'])
-            self.assertEqual((task.pet_id, task.type, task.payload), (self.pet_id, 'avatar_batch', {'media_id': media_id}))
-        polled = self.client.get(f"/api/v1/tasks/{body['task_id']}", headers=self.headers)
+            self.assertEqual(
+                (task.pet_id, task.type, task.payload), (self.pet_id, 'avatar_batch', {'media_id': media_id})
+            )
+        polled = self.client.get(f'/api/v1/tasks/{body["task_id"]}', headers=self.headers)
         self.assertEqual(polled.status_code, 200)
         self.assertEqual(polled.json()['status'], 'pending')
 
@@ -131,7 +146,7 @@ class AvatarAPITests(AuthAPIFixture, unittest.TestCase):
         again = self.submit(media_id)
         self.assertEqual(again.json()['task_id'], first['task_id'])
         self.assertEqual(again.json()['status'], 'succeeded')
-        polled = self.client.get(f"/api/v1/tasks/{first['task_id']}", headers=self.headers).json()
+        polled = self.client.get(f'/api/v1/tasks/{first["task_id"]}', headers=self.headers).json()
         self.assertEqual(polled['result'], {'ok': True})
 
     def test_failed_task_requeues_when_user_resubmits(self):

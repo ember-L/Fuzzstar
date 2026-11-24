@@ -3,6 +3,7 @@
 人设上下文=档案+最新初筛状态+免责；红线关键词零 LLM 附就医引导卡；
 LLM 失败/禁词/解析失败降级模板安抚，对话不中断；用量全审计。
 """
+
 import json
 import unittest
 from pathlib import Path
@@ -10,18 +11,34 @@ from tempfile import TemporaryDirectory
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_auth_api import AuthAPIFixture
 
-from app.services.chat import (CHAT_DISCLAIMER, REDLINE_SUBTITLE, ChatReplyError, build_persona_messages,
-                      detect_redline, fallback_reply, load_chat_config, parse_chat_reply, redline_response)
-from app.services.identity import create_email_account, verify_email
 from app.models import AiUsageLog
 from app.providers.fake import FakeLLMProvider
-from test_auth_api import AuthAPIFixture
+from app.services.chat import (
+    CHAT_DISCLAIMER,
+    REDLINE_SUBTITLE,
+    ChatReplyError,
+    build_persona_messages,
+    detect_redline,
+    fallback_reply,
+    load_chat_config,
+    parse_chat_reply,
+    redline_response,
+)
+from app.services.identity import create_email_account, verify_email
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 CONFIG = load_chat_config(RULES_DIR)
-PET = {'name': '团团', 'species': 'cat', 'breed': '狸花', 'sex': 'female',
-       'age_months': 30, 'neutered': True, 'body_type': 'standard'}
+PET = {
+    'name': '团团',
+    'species': 'cat',
+    'breed': '狸花',
+    'sex': 'female',
+    'age_months': 30,
+    'neutered': True,
+    'body_type': 'standard',
+}
 
 
 class ChatLogicTests(unittest.TestCase):
@@ -39,7 +56,8 @@ class ChatLogicTests(unittest.TestCase):
             (Path(tmp) / 'chat.yaml').write_text(
                 'version: ct-x\ncontext_window: 20\ninput_max: 500\nreply_max: 100\n'
                 'disclaimer: 参考\nredline_keywords: []\nfallback_reply: 喵\nredline_reply: 就医\n',
-                encoding='utf-8')
+                encoding='utf-8',
+            )
             with self.assertRaises(RuntimeError):
                 load_chat_config(Path(tmp))
 
@@ -96,13 +114,14 @@ class ChatLogicTests(unittest.TestCase):
 class ChatFixture(AuthAPIFixture):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
         self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'})
         pet = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'})
         self.pet_id = pet.json()['id']
         self.app.state.chat_llm_provider = FakeLLMProvider(reply='{"reply": "喵～我在呢", "emotion": "happy"}')
-        self.session_id = self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions',
-                                           headers=self.headers).json()['session_id']
+        self.session_id = self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions', headers=self.headers).json()[
+            'session_id'
+        ]
 
     @property
     def app(self):
@@ -116,14 +135,19 @@ class ChatFixture(AuthAPIFixture):
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, email, self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login(email).json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login(email).json()["access_token"]}'}
         if consent:
-            self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+            self.client.post(
+                '/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}
+            ).raise_for_status()
         return headers
 
     def send(self, content, **extra):
-        return self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                headers=self.headers, json={'kind': 'text', 'content': content, **extra})
+        return self.client.post(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            headers=self.headers,
+            json={'kind': 'text', 'content': content, **extra},
+        )
 
     def make_screening(self, state):
         answers = {'spirit': 'normal', 'appetite': 'normal', 'symptoms': [], 'redline_options': [], 'media_ids': []}
@@ -222,34 +246,45 @@ class ChatAPITests(ChatFixture, unittest.TestCase):
         with Session(self.engine) as db:
             logs = db.scalars(select(AiUsageLog).order_by(AiUsageLog.id)).all()
             self.assertEqual(len(logs), 2)
-            self.assertEqual((logs[0].kind, logs[0].task_id, logs[0].tokens_in, logs[0].tokens_out),
-                             ('llm', None, 100, 30))
+            self.assertEqual(
+                (logs[0].kind, logs[0].task_id, logs[0].tokens_in, logs[0].tokens_out), ('llm', None, 100, 30)
+            )
             self.assertIsNone(logs[1].tokens_in)
 
     def test_history_pagination_descending_with_cursor(self):
         for index in range(5):
             self.send(f'消息{index}').raise_for_status()
-        page = self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                               headers=self.headers, params={'limit': 4})
+        page = self.client.get(
+            f'/api/v1/chat/sessions/{self.session_id}/messages', headers=self.headers, params={'limit': 4}
+        )
         page.raise_for_status()
         items = page.json()['items']
         self.assertEqual(len(items), 4)
         self.assertGreater(items[0]['id'], items[-1]['id'])
         self.assertEqual(items[0]['role'], 'pet')
-        older = self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                headers=self.headers, params={'limit': 4, 'before': page.json()['next_before']})
+        older = self.client.get(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            headers=self.headers,
+            params={'limit': 4, 'before': page.json()['next_before']},
+        )
         older.raise_for_status()
         self.assertEqual(len(older.json()['items']), 4)
         self.assertLess(older.json()['items'][0]['id'], items[-1]['id'])
-        last = self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                               headers=self.headers, params={'limit': 4, 'before': older.json()['next_before']})
+        last = self.client.get(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            headers=self.headers,
+            params={'limit': 4, 'before': older.json()['next_before']},
+        )
         last.raise_for_status()
         self.assertEqual(len(last.json()['items']), 2)
         self.assertIsNone(last.json()['next_before'])
 
     def test_audio_kind_not_accepted_until_t16(self):
-        response = self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                    headers=self.headers, json={'kind': 'audio', 'content': 'x'})
+        response = self.client.post(
+            f'/api/v1/chat/sessions/{self.session_id}/messages',
+            headers=self.headers,
+            json={'kind': 'audio', 'content': 'x'},
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_missing_config_returns_503(self):
@@ -267,24 +302,37 @@ class ChatAPITests(ChatFixture, unittest.TestCase):
     def test_ownership_and_consent_gates(self):
         self.assertEqual(self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages').status_code, 401)
         other_headers = self.verified_account('other@example.com', consent=False)
-        self.assertEqual(self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions',
-                                          headers=other_headers).status_code, 403)
+        self.assertEqual(
+            self.client.post(f'/api/v1/pets/{self.pet_id}/chat/sessions', headers=other_headers).status_code, 403
+        )
         stranger_headers = self.verified_account('stranger@example.com', consent=True)
-        self.assertEqual(self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                         headers=stranger_headers).status_code, 404)
-        self.assertEqual(self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                          headers=stranger_headers, json={'kind': 'text', 'content': 'hi'}).status_code, 404)
+        self.assertEqual(
+            self.client.get(f'/api/v1/chat/sessions/{self.session_id}/messages', headers=stranger_headers).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                f'/api/v1/chat/sessions/{self.session_id}/messages',
+                headers=stranger_headers,
+                json={'kind': 'text', 'content': 'hi'},
+            ).status_code,
+            404,
+        )
 
     def test_threads_isolated_per_pet(self):
         second = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '圆圆'})
         second_pet = second.json()['id']
-        second_session = self.client.post(f'/api/v1/pets/{second_pet}/chat/sessions',
-                                          headers=self.headers).json()['session_id']
+        second_session = self.client.post(f'/api/v1/pets/{second_pet}/chat/sessions', headers=self.headers).json()[
+            'session_id'
+        ]
         self.assertNotEqual(second_session, self.session_id)
         self.send('团团专属秘密').raise_for_status()
         self.provider.calls.clear()
-        self.client.post(f'/api/v1/chat/sessions/{second_session}/messages',
-                         headers=self.headers, json={'kind': 'text', 'content': '你好'}).raise_for_status()
+        self.client.post(
+            f'/api/v1/chat/sessions/{second_session}/messages',
+            headers=self.headers,
+            json={'kind': 'text', 'content': '你好'},
+        ).raise_for_status()
         self.assertNotIn('团团专属秘密', json.dumps(self.provider.calls[-1]['messages'], ensure_ascii=False))
 
     def test_idempotent_replay_does_not_duplicate(self):
@@ -311,8 +359,9 @@ class ChatAPITests(ChatFixture, unittest.TestCase):
 
     def test_invalid_idempotency_key_rejected(self):
         headers = {**self.headers, 'Idempotency-Key': 'k' * 65}
-        response = self.client.post(f'/api/v1/chat/sessions/{self.session_id}/messages',
-                                    headers=headers, json={'kind': 'text', 'content': 'hi'})
+        response = self.client.post(
+            f'/api/v1/chat/sessions/{self.session_id}/messages', headers=headers, json={'kind': 'text', 'content': 'hi'}
+        )
         self.assertEqual(response.status_code, 400)
 
 

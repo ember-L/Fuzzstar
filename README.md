@@ -29,22 +29,47 @@
 
 ```text
 backend/
-  .env.example  🔑 唯一环境配置模板（本机与 Compose 共用）
+  team.env      🤝 团队共享配置（随仓库提交，只改 SERVER_HOST 一行）
+  .env.example  🔑 个人覆盖模板（可选；本机与 Compose 共用）
+  pyproject.toml ⚙️ ruff / pytest 工程约定（行宽 120、单引号、py311）
   app/
     core/        ⚙️ 配置、数据库、鉴权依赖、错误与中间件
-    routers/     🌐 13 个 API 路由模块
+    routers/     🌐 15 个 API 路由模块（含 admin 运营管理台）
     schemas/     📦 Pydantic 请求 / 响应模型
     models/      🗃️ SQLAlchemy ORM（按业务域拆分）
     services/    🧠 规则、任务、媒体、配额等业务实现
     providers/   🔌 LLM / 生成服务适配层
+  admin/         🖥️ 运营管理台前端（/admin 静态页，无需构建）
   rules/         📜 版本化 YAML 规则包
   assets/        🎞️ 占位片素材
   migrations/    🧬 Alembic 迁移
+  scripts/       🔧 运维脚本（建管理员、播种演示数据、报表、压测）
   tests/         ✅ 后端测试
 mobile/          📱 Expo App
 docs/            📚 文档（索引见 docs/README.md）
+.editorconfig    ✍️ 编辑器缩进 / 换行 / 编码约定
 docker-compose.yml  🐳 一键本地编排
 ```
+
+## ⚡ 五分钟跑通（连团队共享库，队友推荐）
+
+仓库自带 `backend/team.env`：克隆后**不需要创建 `.env`，也不需要跑迁移**（表结构在主机数据库里）。
+
+```sh
+git clone https://github.com/maodai5/RongXing
+cd RongXing/backend
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# 只改一行：backend/team.env 里的 SERVER_HOST = 跑数据库那台机器的局域网 IP
+.venv\Scripts\python.exe -m uvicorn app.main:create_dev_app --factory --host 0.0.0.0 --port 8000
+```
+
+打开 <http://127.0.0.1:8000/admin> 即为运营管理台；管理员账号密码见 `backend/team.env` 的 `ADMIN_EMAILS`
+与 `python -m scripts.create_admin`。团队网络与账号细节见 `backend/TEAM_SETUP.md`。
+
+`DATABASE_URL` 由 `SERVER_HOST` + `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` 自动拼出；
+读取顺序是 `team.env` → `.env` → 进程环境变量，后者优先，所以想临时连别的库只需在自己建的 `.env` 里写一行。
 
 ## 🚀 快速开始（Docker Compose）
 
@@ -104,10 +129,9 @@ cd backend
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# 编辑 .env：DATABASE_URL、JWT_SECRET、可选的 SMTP / S3 / DashScope
-python -c 'import secrets; print(secrets.token_urlsafe(32))'
-python -m alembic upgrade head
+# 默认读取仓库里的 team.env（团队共享库）；要独立配置时再 cp .env.example .env 覆盖，
+# 并保证 JWT_SECRET 至少 32 字节：python -c 'import secrets; print(secrets.token_urlsafe(32))'
+# 只有自建数据库时才需要迁移：python -m alembic upgrade head
 uvicorn app.main:create_dev_app --factory --host 127.0.0.1 --port 8000
 ```
 

@@ -3,20 +3,31 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.errors import APIError
-from app.services.media import storage_unavailable
-from app.models import Pet, Task, User
 from app.core.deps import consented_user
+from app.core.errors import APIError
+from app.models import Pet, Task, User
+from app.services.media import storage_unavailable
 
 router = APIRouter(prefix='/api/v1')
 
 
 @router.get('/tasks/{task_id}')
-def read_task(request: Request, response: Response, task_id: str = Path(pattern=r'^[0-9a-f]{32}$'),
-              user: User = Depends(consented_user), db: Session = Depends(get_db)):
-    task = db.scalar(select(Task).join(Pet, Pet.id == Task.pet_id).where(
-        Task.id == task_id, Pet.user_id == user.id, Pet.status == 'active',
-    ))
+def read_task(
+    request: Request,
+    response: Response,
+    task_id: str = Path(pattern=r'^[0-9a-f]{32}$'),
+    user: User = Depends(consented_user),
+    db: Session = Depends(get_db),
+):
+    task = db.scalar(
+        select(Task)
+        .join(Pet, Pet.id == Task.pet_id)
+        .where(
+            Task.id == task_id,
+            Pet.user_id == user.id,
+            Pet.status == 'active',
+        )
+    )
     if task is None:
         raise APIError(404, 'NOT_FOUND', '未找到任务')
     response.headers['Cache-Control'] = 'no-store'

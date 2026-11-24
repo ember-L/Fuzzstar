@@ -1,4 +1,5 @@
 """T10 LLM Provider：Fake 与 DashScope qwen-max 适配（httpx MockTransport）。"""
+
 import json
 import unittest
 
@@ -38,8 +39,13 @@ class DashScopeLLMTests(unittest.IsolatedAsyncioTestCase):
             seen['url'] = str(request.url)
             seen['auth'] = request.headers.get('Authorization')
             seen['body'] = json.loads(request.content)
-            return httpx.Response(200, json={'output': {'choices': [{'message': {'content': REPLY}}]},
-                                             'usage': {'input_tokens': 120, 'output_tokens': 40}})
+            return httpx.Response(
+                200,
+                json={
+                    'output': {'choices': [{'message': {'content': REPLY}}]},
+                    'usage': {'input_tokens': 120, 'output_tokens': 40},
+                },
+            )
 
         provider = self._provider(handler)
         text = await provider.chat(MESSAGES, temperature=0.2, max_tokens=600)

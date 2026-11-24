@@ -1,4 +1,5 @@
 """一次性构建占位片库：python -m scripts.build_placeholder_library（backend 目录，需 ffmpeg）。"""
+
 import argparse
 from pathlib import Path
 
@@ -15,10 +16,17 @@ def main() -> None:
     parser.add_argument('--duration', type=float, default=4.0)
     parser.add_argument('--supersample', type=int, default=2)
     args = parser.parse_args()
-    manifest = build_library(args.out, version=args.version, width=args.width, height=args.height,
-                             fps=args.fps, duration=args.duration, supersample=args.supersample)
+    manifest = build_library(
+        args.out,
+        version=args.version,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        duration=args.duration,
+        supersample=args.supersample,
+    )
     total = sum(clip['bytes'] for group in manifest['clips'].values() for clip in group.values())
-    print(f"占位片库 {manifest['version']} → {args.out}（21 条，共 {total / 1024 / 1024:.1f} MiB）")
+    print(f'占位片库 {manifest["version"]} → {args.out}（21 条，共 {total / 1024 / 1024:.1f} MiB）')
 
 
 if __name__ == '__main__':

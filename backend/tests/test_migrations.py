@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
@@ -11,10 +12,9 @@ from sqlalchemy.orm import Session
 from app.models import MediaUpload, User
 from app.services.consents import grant_consent, has_required_consents
 from app.services.identity import create_email_account, login_email, verify_email
+from app.services.pets import PetInput, create_pet, list_pets
 from app.services.sessions import create_session, rotate_refresh_token
 from app.services.tasks import claim_task, enqueue_task, finish_task
-from datetime import datetime
-from app.services.pets import PetInput, create_pet, list_pets
 
 
 class MigrationTests(unittest.TestCase):
@@ -24,18 +24,46 @@ class MigrationTests(unittest.TestCase):
             url = 'sqlite:///' + str(Path(directory) / 'migration.db')
             env = {**os.environ, 'DATABASE_URL': url}
             for _ in range(2):
-                subprocess.run([sys.executable, '-m', 'alembic', 'upgrade', 'head'], cwd=root,
-                               env=env, check=True, capture_output=True, text=True)
+                subprocess.run(
+                    [sys.executable, '-m', 'alembic', 'upgrade', 'head'],
+                    cwd=root,
+                    env=env,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
             engine = create_engine(url)
-            self.assertTrue({'users', 'pets', 'user_credentials', 'consents', 'auth_sessions', 'refresh_tokens', 'verification_mail', 'auth_rate_buckets', 'tasks', 'media_uploads', 'alembic_version'} <= set(inspect(engine).get_table_names()))
+            self.assertTrue(
+                {
+                    'users',
+                    'pets',
+                    'user_credentials',
+                    'consents',
+                    'auth_sessions',
+                    'refresh_tokens',
+                    'verification_mail',
+                    'auth_rate_buckets',
+                    'tasks',
+                    'media_uploads',
+                    'alembic_version',
+                }
+                <= set(inspect(engine).get_table_names())
+            )
             with engine.connect() as connection:
                 self.assertEqual(connection.execute(text('select count(*) from alembic_version')).scalar_one(), 1)
             with Session(engine) as session:
                 session.add(User(id=1, nickname='测试'))
                 session.commit()
                 pet = create_pet(session, 1, PetInput(name='团团'))
-                session.add(MediaUpload(id='a' * 32, pet_id=pet.id, content_type='image/png',
-                                        size_bytes=42, expires_at=datetime(2026, 11, 18)))
+                session.add(
+                    MediaUpload(
+                        id='a' * 32,
+                        pet_id=pet.id,
+                        content_type='image/png',
+                        size_bytes=42,
+                        expires_at=datetime(2026, 11, 18),
+                    )
+                )
                 task_id = enqueue_task(session, pet.id, 'avatar_batch', 'photo-1', {}).id
                 session.commit()
                 attempt = claim_task(session, task_id)

@@ -1,4 +1,5 @@
 """Uniform API error type and JSON error response helpers."""
+
 from fastapi.responses import JSONResponse
 
 
@@ -12,8 +13,7 @@ def api_error(status: int, code: str, message: str, detail: dict | None = None) 
     headers = {'Cache-Control': 'no-store'}
     if status == 401:
         headers['WWW-Authenticate'] = 'Bearer'
-    return JSONResponse({'code': code, 'message': message, 'detail': detail or {}},
-                        status_code=status, headers=headers)
+    return JSONResponse({'code': code, 'message': message, 'detail': detail or {}}, status_code=status, headers=headers)
 
 
 def auth_required() -> JSONResponse:

@@ -1,22 +1,30 @@
 """T08 健康分纯规则引擎（附录 D）：读时衰减、最高档状态、明细可追溯。"""
+
 import unittest
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.services.health import compute_health
 from app.main import app
+from app.services.health import compute_health
 
 NOW = datetime(2026, 11, 19, 12, 0, 0)
 
 
 def event(severity, *, hours_ago=0, delta=None, resolved=False, active=True, event_id=1):
     defaults = {'observe': 10, 'vet': 30, 'urgent': 60}
-    return {'id': event_id, 'source': 'screening', 'source_id': event_id, 'severity': severity,
-            'score_delta': defaults[severity] if delta is None else delta, 'active': active,
-            'resolved_at': NOW - timedelta(hours=1) if resolved else None,
-            'created_at': NOW - timedelta(hours=hours_ago), 'rules_version': 'sx-2026-11-19+rl-2026-11-19',
-            'symptoms': ['呕吐']}
+    return {
+        'id': event_id,
+        'source': 'screening',
+        'source_id': event_id,
+        'severity': severity,
+        'score_delta': defaults[severity] if delta is None else delta,
+        'active': active,
+        'resolved_at': NOW - timedelta(hours=1) if resolved else None,
+        'created_at': NOW - timedelta(hours=hours_ago),
+        'rules_version': 'sx-2026-11-19+rl-2026-11-19',
+        'symptoms': ['呕吐'],
+    }
 
 
 def compute(events, *, has_screening=True, now=NOW):
@@ -96,14 +104,25 @@ class HealthScoreTests(unittest.TestCase):
         self.assertEqual(len(result['deductions']), 2)
 
     def test_deduction_sum_equals_100_minus_score(self):
-        result = compute([event('observe', hours_ago=100, event_id=1), event('vet', event_id=2),
-                          event('observe', event_id=3)])
+        result = compute(
+            [event('observe', hours_ago=100, event_id=1), event('vet', event_id=2), event('observe', event_id=3)]
+        )
         self.assertEqual(sum(d['effective_delta'] for d in result['deductions']), 100 - result['score'])
 
     def test_deduction_items_carry_traceability_fields(self):
         item = compute([event('observe')])['deductions'][0]
-        for key in ('id', 'source', 'source_id', 'severity', 'symptoms', 'score_delta',
-                    'effective_delta', 'decayed', 'created_at', 'rules_version'):
+        for key in (
+            'id',
+            'source',
+            'source_id',
+            'severity',
+            'symptoms',
+            'score_delta',
+            'effective_delta',
+            'decayed',
+            'created_at',
+            'rules_version',
+        ):
             self.assertIn(key, item)
 
 

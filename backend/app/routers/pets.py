@@ -1,5 +1,4 @@
 """Pet profile and consent routes."""
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
@@ -9,18 +8,28 @@ from app.core.db import get_db
 from app.core.deps import consented_user, current_user, owned_pet
 from app.core.errors import APIError
 from app.models import Pet, User, WeightRecord
-from app.schemas.pets import PolicyVersions, PetProfile, TrainingConsent
+from app.schemas.pets import PetProfile, PolicyVersions, TrainingConsent
 from app.services.consents import consent_state, grant_consent
 from app.services.pets import (
-    PetInput, PetLimitReached, PetNotFound, create_pet, delete_pet, list_pets, update_pet,
+    PetInput,
+    PetLimitReached,
+    PetNotFound,
+    create_pet,
+    delete_pet,
+    list_pets,
+    update_pet,
 )
 
 router = APIRouter(prefix='/api/v1')
 
 
 def _latest_weight(db: Session, pet_id: int):
-    latest = db.scalar(select(WeightRecord).where(WeightRecord.pet_id == pet_id)
-                       .order_by(WeightRecord.measured_at.desc(), WeightRecord.id.desc()).limit(1))
+    latest = db.scalar(
+        select(WeightRecord)
+        .where(WeightRecord.pet_id == pet_id)
+        .order_by(WeightRecord.measured_at.desc(), WeightRecord.id.desc())
+        .limit(1)
+    )
     if latest is None:
         return None
     return {'weight_kg': float(latest.weight_kg), 'measured_at': latest.measured_at.isoformat()}
@@ -31,14 +40,21 @@ def _profile_payload(db: Session, pet: Pet) -> dict:
 
 
 @router.get('/consents')
-def read_consents(request: Request, response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def read_consents(
+    request: Request, response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)
+):
     response.headers['Cache-Control'] = 'no-store'
     return consent_state(db, user, request)
 
 
 @router.post('/consents')
-def accept_consents(data: PolicyVersions, request: Request, response: Response,
-                    user: User = Depends(current_user), db: Session = Depends(get_db)):
+def accept_consents(
+    data: PolicyVersions,
+    request: Request,
+    response: Response,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
     state = consent_state(db, user, request)
     if not all(state['links'].values()):
         raise APIError(503, 'CONSENT_UNAVAILABLE', '隐私政策和服务协议原文尚未配置')
@@ -53,8 +69,13 @@ def accept_consents(data: PolicyVersions, request: Request, response: Response,
 
 
 @router.post('/consents/training')
-def set_training_consent(data: TrainingConsent, request: Request, response: Response,
-                         user: User = Depends(consented_user), db: Session = Depends(get_db)):
+def set_training_consent(
+    data: TrainingConsent,
+    request: Request,
+    response: Response,
+    user: User = Depends(consented_user),
+    db: Session = Depends(get_db),
+):
     # F12-3：单独弹窗授权，默认 false；拒绝不影响任何功能；v1 无训练数据读取路径。
     version = request.app.state.policy_versions['privacy']
     grant_consent(db, user.id, 'training', version, data.granted)

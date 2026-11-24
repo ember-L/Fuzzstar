@@ -1,7 +1,7 @@
 import asyncio
 
-from app.services.media import PhotoStorage
 from app.models import MediaUpload, Task
+from app.services.media import PhotoStorage
 
 ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 MIN_READY = 5
@@ -30,18 +30,19 @@ class S3Assets:
         return cls(storage.client, storage.bucket) if storage is not None else None
 
     async def read_photo(self, media: MediaUpload) -> bytes:
-        obj = await asyncio.to_thread(self.client.get_object, Bucket=self.bucket,
-                                      Key=media.object_key, VersionId=media.version_id)
+        obj = await asyncio.to_thread(
+            self.client.get_object, Bucket=self.bucket, Key=media.object_key, VersionId=media.version_id
+        )
         return obj['Body'].read()
 
     async def read_object(self, key: str, version_id: str) -> bytes:
-        obj = await asyncio.to_thread(self.client.get_object, Bucket=self.bucket,
-                                      Key=key, VersionId=version_id)
+        obj = await asyncio.to_thread(self.client.get_object, Bucket=self.bucket, Key=key, VersionId=version_id)
         return obj['Body'].read()
 
     async def write(self, key: str, data: bytes, content_type: str) -> str:
-        response = await asyncio.to_thread(self.client.put_object, Bucket=self.bucket,
-                                           Key=key, Body=data, ContentType=content_type)
+        response = await asyncio.to_thread(
+            self.client.put_object, Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
+        )
         version = response.get('VersionId')
         if not version:
             raise RuntimeError('avatar bucket must be versioned')
@@ -49,8 +50,11 @@ class S3Assets:
 
     async def presign_url(self, key: str, version_id: str) -> str:
         return await asyncio.to_thread(
-            self.client.generate_presigned_url, 'get_object',
-            Params={'Bucket': self.bucket, 'Key': key, 'VersionId': version_id}, ExpiresIn=3600)
+            self.client.generate_presigned_url,
+            'get_object',
+            Params={'Bucket': self.bucket, 'Key': key, 'VersionId': version_id},
+            ExpiresIn=3600,
+        )
 
 
 async def generate_avatar(task: Task, media: MediaUpload, *, assets, image_provider, video_provider) -> dict:
@@ -72,5 +76,9 @@ async def generate_avatar(task: Task, media: MediaUpload, *, assets, image_provi
             # F03-3: one failed clip must not block the remaining actions.
             clips[action] = {'status': 'failed'}
     ready_count = sum(clip['status'] == 'ready' for clip in clips.values())
-    return {'base_image': {'key': base_key, 'version_id': base_version},
-            'clips': clips, 'ready_count': ready_count, 'usable': ready_count >= MIN_READY}
+    return {
+        'base_image': {'key': base_key, 'version_id': base_version},
+        'clips': clips,
+        'ready_count': ready_count,
+        'usable': ready_count >= MIN_READY,
+    }

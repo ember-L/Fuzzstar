@@ -7,12 +7,12 @@ acceptance needs real-device/load-test evidence).
 
 Usage: python -m scripts.latency_sample [--samples 200] [--json]
 """
+
 import argparse
 import json
 import math
 import os
 import time
-from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 
 from app import main as app_main
 from app.core.security import utcnow
-from app.services.identity import create_email_account, verify_email
 from app.models import Base
+from app.services.identity import create_email_account, verify_email
 from app.services.tasks import enqueue_task
 
 ENDPOINTS = ('health', 'pets', 'pet_health', 'quota', 'diet_day', 'weights', 'action_map', 'task')
@@ -37,18 +37,25 @@ def _percentile(values, fraction):
 
 
 def _stats(durations_ms):
-    return {'n': len(durations_ms),
-            'p50_ms': round(_percentile(durations_ms, 0.50), 2),
-            'p95_ms': round(_percentile(durations_ms, 0.95), 2),
-            'max_ms': round(max(durations_ms), 2)}
+    return {
+        'n': len(durations_ms),
+        'p50_ms': round(_percentile(durations_ms, 0.50), 2),
+        'p95_ms': round(_percentile(durations_ms, 0.95), 2),
+        'max_ms': round(max(durations_ms), 2),
+    }
 
 
 def measure(*, samples=200):
     with TemporaryDirectory() as tmp:
         url = 'sqlite:///' + str(Path(tmp) / 'bench.db')
-        env = {'DATABASE_URL': url, 'JWT_SECRET': 'bench-signing-key-32-bytes-or-more',
-               'PRIVACY_VERSION': 'p1', 'TERMS_VERSION': 't1',
-               'PRIVACY_URL': 'https://example.com/privacy', 'TERMS_URL': 'https://example.com/terms'}
+        env = {
+            'DATABASE_URL': url,
+            'JWT_SECRET': 'bench-signing-key-32-bytes-or-more',
+            'PRIVACY_VERSION': 'p1',
+            'TERMS_VERSION': 't1',
+            'PRIVACY_URL': 'https://example.com/privacy',
+            'TERMS_URL': 'https://example.com/terms',
+        }
         with patch.dict(os.environ, env):
             app = app_main.create_dev_app()
         engine = create_engine(url)
@@ -60,8 +67,9 @@ def measure(*, samples=200):
         all_durations = []
         endpoints = {}
         with TestClient(app) as client:
-            access = client.post('/api/v1/auth/login',
-                                 json={'email': 'bench@example.com', 'password': 'Strong123'}).json()['access_token']
+            access = client.post(
+                '/api/v1/auth/login', json={'email': 'bench@example.com', 'password': 'Strong123'}
+            ).json()['access_token']
             headers = {'Authorization': f'Bearer {access}'}
             client.post('/api/v1/consents', json={'privacy': 'p1', 'terms': 't1'}, headers=headers)
             pet_id = client.post('/api/v1/pets', json={'name': '压测猫'}, headers=headers).json()['id']
@@ -92,8 +100,13 @@ def measure(*, samples=200):
                 all_durations.extend(durations)
         engine.dispose()
     overall = _stats(all_durations)
-    return {'samples_per_endpoint': samples, 'gate_ms': GATE_MS, 'endpoints': endpoints,
-            'overall': overall, 'passed': overall['p95_ms'] <= GATE_MS}
+    return {
+        'samples_per_endpoint': samples,
+        'gate_ms': GATE_MS,
+        'endpoints': endpoints,
+        'overall': overall,
+        'passed': overall['p95_ms'] <= GATE_MS,
+    }
 
 
 def main():
@@ -105,13 +118,17 @@ def main():
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(f"非 AI 接口本地采样（每端点 {args.samples} 次，进程内 ASGI，门禁 p95≤{GATE_MS}ms）")
+        print(f'非 AI 接口本地采样（每端点 {args.samples} 次，进程内 ASGI，门禁 p95≤{GATE_MS}ms）')
         for name, stats in report['endpoints'].items():
-            print(f"  {name:12s} n={stats['n']:4d} p50={stats['p50_ms']:8.2f}ms "
-                  f"p95={stats['p95_ms']:8.2f}ms max={stats['max_ms']:8.2f}ms")
+            print(
+                f'  {name:12s} n={stats["n"]:4d} p50={stats["p50_ms"]:8.2f}ms '
+                f'p95={stats["p95_ms"]:8.2f}ms max={stats["max_ms"]:8.2f}ms'
+            )
         overall = report['overall']
-        print(f"  总体         n={overall['n']:4d} p50={overall['p50_ms']:8.2f}ms "
-              f"p95={overall['p95_ms']:8.2f}ms max={overall['max_ms']:8.2f}ms")
+        print(
+            f'  总体         n={overall["n"]:4d} p50={overall["p50_ms"]:8.2f}ms '
+            f'p95={overall["p95_ms"]:8.2f}ms max={overall["max_ms"]:8.2f}ms'
+        )
         print('门禁：' + ('通过' if report['passed'] else '未通过'))
     raise SystemExit(0 if report['passed'] else 1)
 

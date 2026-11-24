@@ -1,9 +1,9 @@
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from smtplib import SMTPException
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -13,9 +13,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app import main
+from app.models import Base
 from app.services.identity import create_email_account, verify_email
 from app.services.mail_worker import deliver_due
-from app.models import Base
 from app.services.sessions import create_session
 from app.services.tasks import claim_task, enqueue_task, finish_task
 
@@ -25,8 +25,11 @@ class AuthAPIFixture:
     password = 'Strong123'
     key = 'test-signing-key-32-bytes-or-more'
     smtp_settings = {
-        'SMTP_HOST': 'smtp.example.com', 'SMTP_PORT': '465', 'SMTP_USER': 'test',
-        'SMTP_PASSWORD': 'secret', 'SMTP_FROM': 'service@example.com',
+        'SMTP_HOST': 'smtp.example.com',
+        'SMTP_PORT': '465',
+        'SMTP_USER': 'test',
+        'SMTP_PASSWORD': 'secret',
+        'SMTP_FROM': 'service@example.com',
         'VERIFICATION_BASE_URL': 'https://testserver/api/v1/auth/verify-email',
     }
 
@@ -37,30 +40,41 @@ class AuthAPIFixture:
         self.engine = create_engine(url)
         self.addCleanup(self.engine.dispose)
         Base.metadata.create_all(self.engine)
-        self.now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.now = datetime.now(UTC).replace(tzinfo=None)
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, self.email, self.password, self.now)
             verify_email(db, token, self.now)
             create_email_account(db, 'unverified@example.com', self.password, self.now)
-        with patch.dict(os.environ, {
-            'DATABASE_URL': url, 'JWT_SECRET': self.key,
-            'PRIVACY_VERSION': 'p1', 'TERMS_VERSION': 't1',
-            'PRIVACY_URL': 'https://example.com/privacy', 'TERMS_URL': 'https://example.com/terms',
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                'DATABASE_URL': url,
+                'JWT_SECRET': self.key,
+                'PRIVACY_VERSION': 'p1',
+                'TERMS_VERSION': 't1',
+                'PRIVACY_URL': 'https://example.com/privacy',
+                'TERMS_URL': 'https://example.com/terms',
+            },
+        ):
             self.client = TestClient(main.create_dev_app())
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
 
     def login(self, email=None, password=None):
-        return self.client.post('/api/v1/auth/login', json={
-            'email': email or self.email, 'password': password or self.password,
-        })
+        return self.client.post(
+            '/api/v1/auth/login',
+            json={
+                'email': email or self.email,
+                'password': password or self.password,
+            },
+        )
 
     def refresh(self, token):
         return self.client.post('/api/v1/auth/refresh', json={'refresh_token': token})
 
     def me(self, token):
         return self.client.get('/api/v1/me', headers={'Authorization': f'Bearer {token}'})
+
 
 class AuthAPITests(AuthAPIFixture, unittest.TestCase):
     def test_verified_email_can_login_and_read_own_profile(self):
@@ -113,9 +127,13 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.refresh(old_refresh).status_code, 401)
 
     def register(self, email, password=None):
-        return self.client.post('/api/v1/auth/register', json={
-            'email': email, 'password': self.password if password is None else password,
-        })
+        return self.client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': email,
+                'password': self.password if password is None else password,
+            },
+        )
 
     def test_registration_requires_confirmation_before_login(self):
         with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
@@ -185,7 +203,9 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
             self.assertEqual(response.status_code, 429)
             self.assertEqual(response.json()['code'], 'RATE_LIMITED')
             self.assertEqual(response.headers['retry-after'], '50')
-        with patch('app.core.middleware.utcnow', return_value=self.now.replace(second=10, microsecond=0) + timedelta(minutes=1)):
+        with patch(
+            'app.core.middleware.utcnow', return_value=self.now.replace(second=10, microsecond=0) + timedelta(minutes=1)
+        ):
             self.assertEqual(self.login().status_code, 200)
 
     def test_invalid_registration_is_rejected_before_mail(self):
@@ -214,7 +234,9 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(state['required'], {'privacy': 'p1', 'terms': 't1'})
         self.assertFalse(state['granted'])
         self.assertFalse(state['training_granted'])
-        self.assertEqual(self.client.post(consent, headers=headers, json={'privacy': 'p0', 'terms': 't1'}).status_code, 409)
+        self.assertEqual(
+            self.client.post(consent, headers=headers, json={'privacy': 'p0', 'terms': 't1'}).status_code, 409
+        )
         links = self.client.app.state.policy_links
         self.client.app.state.policy_links = {'privacy': '', 'terms': ''}
         self.assertEqual(self.client.post(consent, headers=headers, json=state['required']).status_code, 503)
@@ -223,7 +245,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.client.get(path, headers=headers).json(), [])
         pet = self.client.post(path, headers=headers, json={'name': '团团'})
         self.assertEqual(pet.status_code, 201)
-        detail = f"{path}/{pet.json()['id']}"
+        detail = f'{path}/{pet.json()["id"]}'
         self.assertEqual(self.client.patch(detail, headers=headers, json={'neutered': True}).json()['name'], '团团')
         self.assertTrue(self.client.get(detail, headers=headers).json()['neutered'])
         with Session(self.engine) as db, db.begin():
@@ -243,7 +265,9 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         headers = {'Authorization': 'Bearer ' + self.login().json()['access_token']}
         versions = {'privacy': 'p1', 'terms': 't1'}
         self.client.post('/api/v1/consents', headers=headers, json=versions).raise_for_status()
-        pet_id = self.client.post('/api/v1/pets', headers=headers, json={'name': '团团'}).raise_for_status().json()['id']
+        pet_id = (
+            self.client.post('/api/v1/pets', headers=headers, json={'name': '团团'}).raise_for_status().json()['id']
+        )
         with Session(self.engine) as db, db.begin():
             task_id = enqueue_task(db, pet_id, 'avatar_batch', 'photo-1', {'private': 'input'}).id
         path = '/api/v1/tasks/' + task_id
@@ -252,9 +276,15 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/tasks/invalid', headers=headers).status_code, 400)
         response = self.client.get(path, headers=headers)
         self.assertEqual(response.headers['cache-control'], 'no-store')
-        self.assertEqual(response.json(), {
-            'task_id': task_id, 'type': 'avatar_batch', 'status': 'pending', 'result': None,
-        })
+        self.assertEqual(
+            response.json(),
+            {
+                'task_id': task_id,
+                'type': 'avatar_batch',
+                'status': 'pending',
+                'result': None,
+            },
+        )
         with Session(self.engine) as db, db.begin():
             attempt = claim_task(db, task_id)
             finish_task(db, task_id, attempt, result={'clips': []})

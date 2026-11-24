@@ -4,6 +4,7 @@
 正式授权素材到位后按新版本整库替换（T19）。所有动作均为相位整数倍周期运动，
 首尾帧对齐，循环播放无跳帧。规格：≤5s、720p、H.264、无声。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +13,6 @@ import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from PIL import Image, ImageDraw
 
@@ -43,8 +43,9 @@ def _trig(phase: float) -> tuple[float, float]:
     return s, c
 
 
-def render_frame(body_type: str, action: str, phase: float, *, width: int, height: int,
-                 supersample: int = 1) -> Image.Image:
+def render_frame(
+    body_type: str, action: str, phase: float, *, width: int, height: int, supersample: int = 1
+) -> Image.Image:
     if body_type not in PROPORTIONS:
         raise ValueError(f'unknown body type: {body_type}')
     if action not in ACTIONS:
@@ -88,9 +89,17 @@ def render_frame(body_type: str, action: str, phase: float, *, width: int, heigh
     tail_box = [cx + body_w * 0.30, body_cy - body_h_now * 0.10, cx + body_w * 0.85, body_cy + body_h_now * 0.55]
     d.arc(tail_box, start=-70 + tail, end=60 + tail, fill=FUR, width=max(2, int(H * 0.035)))
     # 身体
-    d.ellipse([cx - body_w / 2 + dx, body_cy - body_h_now / 2, cx + body_w / 2 + dx, body_cy + body_h_now / 2], fill=FUR)
-    d.ellipse([cx - body_w * 0.28 + dx, body_cy - body_h_now * 0.10, cx + body_w * 0.28 + dx, body_cy + body_h_now * 0.46], fill=BELLY)
-    d.ellipse([cx - body_w * 0.42 + dx, body_cy - body_h_now * 0.46, cx - body_w * 0.05 + dx, body_cy - body_h_now * 0.12], fill=FUR_LIGHT)
+    d.ellipse(
+        [cx - body_w / 2 + dx, body_cy - body_h_now / 2, cx + body_w / 2 + dx, body_cy + body_h_now / 2], fill=FUR
+    )
+    d.ellipse(
+        [cx - body_w * 0.28 + dx, body_cy - body_h_now * 0.10, cx + body_w * 0.28 + dx, body_cy + body_h_now * 0.46],
+        fill=BELLY,
+    )
+    d.ellipse(
+        [cx - body_w * 0.42 + dx, body_cy - body_h_now * 0.46, cx - body_w * 0.05 + dx, body_cy - body_h_now * 0.12],
+        fill=FUR_LIGHT,
+    )
     # 头
     head_r = body_w * 0.40
     head_cx = cx + dx + head_dx
@@ -98,10 +107,19 @@ def render_frame(body_type: str, action: str, phase: float, *, width: int, heigh
     ear_h = head_r * 0.55 * (1 - ear_drop)
     for side in (-1, 1):
         ex = head_cx + side * head_r * 0.62
-        d.polygon([(ex - head_r * 0.28, head_cy - head_r * 0.45), (ex + head_r * 0.28, head_cy - head_r * 0.45),
-                   (ex + side * head_r * 0.10, head_cy - head_r * 0.45 - ear_h)], fill=FUR)
+        d.polygon(
+            [
+                (ex - head_r * 0.28, head_cy - head_r * 0.45),
+                (ex + head_r * 0.28, head_cy - head_r * 0.45),
+                (ex + side * head_r * 0.10, head_cy - head_r * 0.45 - ear_h),
+            ],
+            fill=FUR,
+        )
     d.ellipse([head_cx - head_r, head_cy - head_r, head_cx + head_r, head_cy + head_r], fill=FUR)
-    d.ellipse([head_cx - head_r * 0.75, head_cy - head_r * 0.85, head_cx - head_r * 0.10, head_cy - head_r * 0.25], fill=FUR_LIGHT)
+    d.ellipse(
+        [head_cx - head_r * 0.75, head_cy - head_r * 0.85, head_cx - head_r * 0.10, head_cy - head_r * 0.25],
+        fill=FUR_LIGHT,
+    )
     # 眼睛
     eye_y = head_cy - head_r * 0.05
     for side in (-1, 1):
@@ -114,23 +132,67 @@ def render_frame(body_type: str, action: str, phase: float, *, width: int, heigh
     # 鼻子与嘴
     ny = head_cy + head_r * 0.28
     d.polygon([(head_cx - head_r * 0.10, ny), (head_cx + head_r * 0.10, ny), (head_cx, ny + head_r * 0.12)], fill=LINE)
-    d.arc([head_cx - head_r * 0.22, ny, head_cx, ny + head_r * 0.28], start=0, end=120, fill=LINE, width=max(1, int(H * 0.005)))
-    d.arc([head_cx, ny, head_cx + head_r * 0.22, ny + head_r * 0.28], start=60, end=180, fill=LINE, width=max(1, int(H * 0.005)))
+    d.arc(
+        [head_cx - head_r * 0.22, ny, head_cx, ny + head_r * 0.28],
+        start=0,
+        end=120,
+        fill=LINE,
+        width=max(1, int(H * 0.005)),
+    )
+    d.arc(
+        [head_cx, ny, head_cx + head_r * 0.22, ny + head_r * 0.28],
+        start=60,
+        end=180,
+        fill=LINE,
+        width=max(1, int(H * 0.005)),
+    )
     if supersample > 1:
         img = img.resize((width, height), Image.LANCZOS)
     return img
 
 
 def _encode(frames: list[Image.Image], out: Path, *, width: int, height: int, fps: int) -> None:
-    cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
-           '-s', f'{width}x{height}', '-r', str(fps), '-i', 'pipe:0',
-           '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '28',
-           '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(out)]
+    cmd = [
+        'ffmpeg',
+        '-y',
+        '-loglevel',
+        'error',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        '-s',
+        f'{width}x{height}',
+        '-r',
+        str(fps),
+        '-i',
+        'pipe:0',
+        '-an',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'fast',
+        '-crf',
+        '28',
+        '-pix_fmt',
+        'yuv420p',
+        '-movflags',
+        '+faststart',
+        str(out),
+    ]
     subprocess.run(cmd, input=b''.join(frame.tobytes() for frame in frames), check=True, capture_output=True)
 
 
-def build_library(root: Path, *, version: str = DEFAULT_VERSION, width: int = 1280, height: int = 720,
-                  fps: int = 24, duration: float = 4.0, supersample: int = 2) -> dict:
+def build_library(
+    root: Path,
+    *,
+    version: str = DEFAULT_VERSION,
+    width: int = 1280,
+    height: int = 720,
+    fps: int = 24,
+    duration: float = 4.0,
+    supersample: int = 2,
+) -> dict:
     if width % 2 or height % 2:
         raise ValueError('width and height must be even for yuv420p')
     if not 0 < duration <= 5:
@@ -142,9 +204,12 @@ def build_library(root: Path, *, version: str = DEFAULT_VERSION, width: int = 12
     for body_type in BODY_TYPES:
         clips[body_type] = {}
         for action in ACTIONS:
-            frames = [render_frame(body_type, action, 2 * math.pi * i / n_frames,
-                                   width=width, height=height, supersample=supersample)
-                      for i in range(n_frames)]
+            frames = [
+                render_frame(
+                    body_type, action, 2 * math.pi * i / n_frames, width=width, height=height, supersample=supersample
+                )
+                for i in range(n_frames)
+            ]
             rel = f'{body_type}/{action}.mp4'
             out = root / rel
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -154,8 +219,15 @@ def build_library(root: Path, *, version: str = DEFAULT_VERSION, width: int = 12
     manifest = {
         'version': version,
         'art': 'programmatic-placeholder-v1',
-        'spec': {'width': width, 'height': height, 'fps': fps, 'duration_s': duration,
-                 'codec': 'h264', 'audio': False, 'loop_aligned': True},
+        'spec': {
+            'width': width,
+            'height': height,
+            'fps': fps,
+            'duration_s': duration,
+            'codec': 'h264',
+            'audio': False,
+            'loop_aligned': True,
+        },
         'body_types': list(BODY_TYPES),
         'actions': list(ACTIONS),
         'clips': clips,
@@ -169,7 +241,7 @@ class Library:
     root: Path
     manifest: dict
 
-    def clip_path(self, version: str, body_type: str, action: str) -> Optional[Path]:
+    def clip_path(self, version: str, body_type: str, action: str) -> Path | None:
         if version != self.manifest['version']:
             return None
         clip = self.manifest.get('clips', {}).get(body_type, {}).get(action)
@@ -178,7 +250,7 @@ class Library:
         return self.root / clip['file']
 
 
-def load_library(root: Path) -> Optional[Library]:
+def load_library(root: Path) -> Library | None:
     root = Path(root)
     path = root / 'manifest.json'
     if not path.is_file():
@@ -190,7 +262,14 @@ def load_library(root: Path) -> Optional[Library]:
 def manifest_payload(library: Library, *, base_url: str) -> dict:
     manifest = library.manifest
     version = manifest['version']
-    groups = {body_type: {action: f'{base_url}/{version}/{body_type}/{action}.mp4' for action in manifest['actions']}
-              for body_type in manifest['body_types']}
-    return {'version': version, 'spec': manifest['spec'], 'body_types': manifest['body_types'],
-            'actions': manifest['actions'], 'groups': groups}
+    groups = {
+        body_type: {action: f'{base_url}/{version}/{body_type}/{action}.mp4' for action in manifest['actions']}
+        for body_type in manifest['body_types']
+    }
+    return {
+        'version': version,
+        'spec': manifest['spec'],
+        'body_types': manifest['body_types'],
+        'actions': manifest['actions'],
+        'groups': groups,
+    }

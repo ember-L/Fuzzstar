@@ -3,6 +3,7 @@
 Never log query strings, request bodies, headers, emails, passwords or tokens.
 user_id is an internal integer; request_id correlates client and server traces.
 """
+
 import json
 import logging
 import re
@@ -56,9 +57,16 @@ async def request_log(request, call_next):
     user_id = _bearer_user_id(request)
 
     def emit(status):
-        _emit(ACCESS, event='http', request_id=request_id, method=request.method,
-              path=request.url.path, status=status,
-              duration_ms=round((time.perf_counter() - started) * 1000, 2), user_id=user_id)
+        _emit(
+            ACCESS,
+            event='http',
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status=status,
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            user_id=user_id,
+        )
 
     try:
         response = await call_next(request)

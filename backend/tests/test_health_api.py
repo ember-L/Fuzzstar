@@ -1,17 +1,22 @@
 """T08 GET /pets/{id}/health：状态档+健康分+扣分明细+概览；复查覆盖旧事件。"""
+
+import unittest
 from datetime import timedelta
 from unittest import TestCase
 from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_screening_api import CARD_SUBTITLE, CARD_TITLE, PREPARATION, ScreeningFixture
 
-from test_screening_api import ScreeningFixture, CARD_TITLE, CARD_SUBTITLE, PREPARATION
 from app.core.security import utcnow
 from app.models import HealthEvent, Pet
 
-OBSERVE_BODY = {'spirit': 'normal', 'appetite': 'normal',
-                'symptoms': [{'code': 'vomiting', 'duration': '2-12h', 'frequency': '2-3'}]}
+OBSERVE_BODY = {
+    'spirit': 'normal',
+    'appetite': 'normal',
+    'symptoms': [{'code': 'vomiting', 'duration': '2-12h', 'frequency': '2-3'}],
+}
 URGENT_BODY = {'spirit': 'normal', 'appetite': 'normal', 'redline_options': ['open_mouth_breathing']}
 
 
@@ -25,14 +30,22 @@ class HealthApiTests(HealthApiFixture, TestCase):
         self.assertEqual(self.client.get(f'/api/v1/pets/{self.pet}/health').status_code, 401)
         self.verified_account('other@example.com', consent=False)
         token = self.login(email='other@example.com').json()['access_token']
-        self.assertEqual(self.client.get(f'/api/v1/pets/{self.pet}/health',
-                                         headers={'Authorization': 'Bearer ' + token}).status_code, 403)
+        self.assertEqual(
+            self.client.get(
+                f'/api/v1/pets/{self.pet}/health', headers={'Authorization': 'Bearer ' + token}
+            ).status_code,
+            403,
+        )
 
     def test_other_users_pet_is_404(self):
         self.verified_account('other@example.com')
         token = self.login(email='other@example.com').json()['access_token']
-        self.assertEqual(self.client.get(f'/api/v1/pets/{self.pet}/health',
-                                         headers={'Authorization': 'Bearer ' + token}).status_code, 404)
+        self.assertEqual(
+            self.client.get(
+                f'/api/v1/pets/{self.pet}/health', headers={'Authorization': 'Bearer ' + token}
+            ).status_code,
+            404,
+        )
 
     def test_deleted_pet_is_404(self):
         with Session(self.engine) as db:
@@ -108,8 +121,9 @@ class HealthApiTests(HealthApiFixture, TestCase):
         self.assertEqual(len(data['deductions']), 1)
         self.assertEqual(data['deductions'][0]['severity'], 'urgent')
         with Session(self.engine) as db:
-            resolved = db.scalars(select(HealthEvent).where(HealthEvent.pet_id == self.pet,
-                                                           HealthEvent.active == False)).all()
+            resolved = db.scalars(
+                select(HealthEvent).where(HealthEvent.pet_id == self.pet, HealthEvent.active.is_(False))
+            ).all()
             self.assertEqual(len(resolved), 1)
             self.assertEqual(resolved[0].severity, 'observe')
 
@@ -127,7 +141,11 @@ class HealthApiTests(HealthApiFixture, TestCase):
         self.assertEqual(data['deductions'][0]['effective_delta'], 0)
 
     def test_multi_pet_isolation(self):
-        pet2 = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '圆圆'}).raise_for_status().json()['id']
+        pet2 = (
+            self.client.post('/api/v1/pets', headers=self.headers, json={'name': '圆圆'})
+            .raise_for_status()
+            .json()['id']
+        )
         self.submit(OBSERVE_BODY, pet=pet2).raise_for_status()
         self.assertIsNone(self.health().json()['score'])
         self.assertEqual(self.health(pet=pet2).json()['score'], 90)

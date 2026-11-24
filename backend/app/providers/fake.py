@@ -51,7 +51,9 @@ class FakeLLMProvider:
     provider = 'fake'
     model = 'fake'
 
-    def __init__(self, reply: str = '{"text": "建议观察精神与食欲变化。", "tips": ["记录变化"]}', *, fail_times: int = 0):
+    def __init__(
+        self, reply: str = '{"text": "建议观察精神与食欲变化。", "tips": ["记录变化"]}', *, fail_times: int = 0
+    ):
         self.reply = reply
         self.fail_times = fail_times
         self.calls = []

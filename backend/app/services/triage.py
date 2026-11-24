@@ -1,7 +1,7 @@
 """版本化初筛规则引擎：红线最先硬判定，其余按 YAML 分级；LLM 不参与（FRD F05-4/5）。"""
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -17,7 +17,7 @@ class RulesBundle:
 
     @property
     def rules_version(self) -> str:
-        return f"{self.symptoms['version']}+{self.redlines['version']}"
+        return f'{self.symptoms["version"]}+{self.redlines["version"]}'
 
 
 def _version(data: dict, name: str) -> str:
@@ -62,13 +62,17 @@ def _load_symptoms(data: dict) -> dict:
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get('code'), str) or not entry['code']:
             raise RuntimeError('symptoms: each symptom needs a code')
-        if entry['code'] in codes or not isinstance(entry.get('label'), str) or not isinstance(entry.get('frequency'), bool):
-            raise RuntimeError(f"symptoms: duplicate code or missing label/frequency for {entry.get('code')}")
+        if (
+            entry['code'] in codes
+            or not isinstance(entry.get('label'), str)
+            or not isinstance(entry.get('frequency'), bool)
+        ):
+            raise RuntimeError(f'symptoms: duplicate code or missing label/frequency for {entry.get("code")}')
         codes.add(entry['code'])
-        _check_conditions(entry.get('observe', []), f"symptoms.{entry['code']}.observe")
-        _check_conditions(entry.get('vet', []), f"symptoms.{entry['code']}.vet")
+        _check_conditions(entry.get('observe', []), f'symptoms.{entry["code"]}.observe')
+        _check_conditions(entry.get('vet', []), f'symptoms.{entry["code"]}.vet')
         if 'severe_label' in entry and not isinstance(entry['severe_label'], str):
-            raise RuntimeError(f"symptoms: severe_label for {entry['code']} must be a string")
+            raise RuntimeError(f'symptoms: severe_label for {entry["code"]} must be a string')
     return data
 
 
@@ -79,40 +83,58 @@ def _load_redlines(data: dict, symptom_codes: set) -> dict:
         raise RuntimeError('redlines: redline list must not be empty')
     option_codes = set()
     for entry in entries:
-        if not isinstance(entry, dict) or not isinstance(entry.get('code'), str) or not isinstance(entry.get('label'), str):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get('code'), str)
+            or not isinstance(entry.get('label'), str)
+        ):
             raise RuntimeError('redlines: each redline needs code and label')
         options, derived = entry.get('options'), entry.get('derived')
         if options is None and derived is None:
-            raise RuntimeError(f"redlines: {entry['code']} needs options or a derived rule")
+            raise RuntimeError(f'redlines: {entry["code"]} needs options or a derived rule')
         if options is not None:
             if not isinstance(options, list) or not options:
-                raise RuntimeError(f"redlines: {entry['code']} options must not be empty")
+                raise RuntimeError(f'redlines: {entry["code"]} options must not be empty')
             for option in options:
-                if not isinstance(option, dict) or not isinstance(option.get('code'), str) or not isinstance(option.get('label'), str):
-                    raise RuntimeError(f"redlines: {entry['code']} option needs code and label")
+                if (
+                    not isinstance(option, dict)
+                    or not isinstance(option.get('code'), str)
+                    or not isinstance(option.get('label'), str)
+                ):
+                    raise RuntimeError(f'redlines: {entry["code"]} option needs code and label')
                 if option['code'] in option_codes:
-                    raise RuntimeError(f"redlines: duplicate option {option['code']}")
+                    raise RuntimeError(f'redlines: duplicate option {option["code"]}')
                 option_codes.add(option['code'])
-        if derived is not None:
-            if (not isinstance(derived, dict) or derived.get('symptom') not in symptom_codes
-                    or not isinstance(derived.get('duration'), list) or not derived['duration']):
-                raise RuntimeError(f"redlines: {entry['code']} derived rule must reference a known symptom and durations")
+        if derived is not None and (
+            not isinstance(derived, dict)
+            or derived.get('symptom') not in symptom_codes
+            or not isinstance(derived.get('duration'), list)
+            or not derived['duration']
+        ):
+            raise RuntimeError(f'redlines: {entry["code"]} derived rule must reference a known symptom and durations')
     return data
 
 
 def _load_scoring(data: dict) -> dict:
     _version(data, 'scoring')
     deltas = data.get('deltas')
-    if not isinstance(deltas, dict) or set(deltas) != set(_SEVERITIES) or not all(
-            isinstance(v, int) and v > 0 for v in deltas.values()):
+    if (
+        not isinstance(deltas, dict)
+        or set(deltas) != set(_SEVERITIES)
+        or not all(isinstance(v, int) and v > 0 for v in deltas.values())
+    ):
         raise RuntimeError('scoring: deltas must define positive integers for observe/vet/urgent')
     decay = data.get('decay')
-    if not isinstance(decay, dict) or not isinstance(decay.get('observe_hours'), (int, float)) or decay['observe_hours'] <= 0:
+    if (
+        not isinstance(decay, dict)
+        or not isinstance(decay.get('observe_hours'), (int, float))
+        or decay['observe_hours'] <= 0
+    ):
         raise RuntimeError('scoring: decay.observe_hours must be positive')
     return data
 
 
-def load_rules(directory: Path) -> Optional[RulesBundle]:
+def load_rules(directory: Path) -> RulesBundle | None:
     paths = {name: directory / f'{name}.yaml' for name in ('symptoms', 'redlines', 'scoring')}
     if not all(path.is_file() for path in paths.values()):
         return None
@@ -139,8 +161,10 @@ def validate_answers(bundle: RulesBundle, answers: dict) -> list:
     """返回 [{field, message}]；空列表表示可提交。字段定位供 AC-05-1/2。"""
     errors = []
     spec = bundle.symptoms
-    for key, options, message in (('spirit', spec['spirit_options'], '请选择精神状态'),
-                                  ('appetite', spec['appetite_options'], '请选择食欲状态')):
+    for key, options, message in (
+        ('spirit', spec['spirit_options'], '请选择精神状态'),
+        ('appetite', spec['appetite_options'], '请选择食欲状态'),
+    ):
         if answers.get(key) not in options:
             errors.append({'field': key, 'message': message})
     index = _symptom_index(bundle)
@@ -161,7 +185,7 @@ def validate_answers(bundle: RulesBundle, answers: dict) -> list:
             errors.append({'field': f'{prefix}.frequency', 'message': '请选择频次'})
         notes = item.get('notes')
         if notes is not None and (not isinstance(notes, str) or len(notes) > spec['notes_max']):
-            errors.append({'field': f'{prefix}.notes', 'message': f"备注不超过 {spec['notes_max']} 字"})
+            errors.append({'field': f'{prefix}.notes', 'message': f'备注不超过 {spec["notes_max"]} 字'})
         if 'severe' in item and not isinstance(item['severe'], bool):
             errors.append({'field': f'{prefix}.severe', 'message': '严重标志必须为布尔值'})
     option_codes = {o['code'] for r in bundle.redlines['redlines'] for o in r.get('options', [])}
@@ -199,23 +223,32 @@ def triage(bundle: RulesBundle, answers: dict) -> dict:
     grades = {}
     for code, item in selected.items():
         entry = _symptom_index(bundle)[code]
-        context = {'duration': item.get('duration'), 'frequency': item.get('frequency'),
-                   'spirit': answers.get('spirit'), 'appetite': answers.get('appetite'),
-                   'severe': bool(item.get('severe', False))}
+        context = {
+            'duration': item.get('duration'),
+            'frequency': item.get('frequency'),
+            'spirit': answers.get('spirit'),
+            'appetite': answers.get('appetite'),
+            'severe': bool(item.get('severe', False)),
+        }
         grades[code] = 'vet' if any(_matches(c, context) for c in entry.get('vet', [])) else 'observe'
     if hits:
         state = 'urgent'
-    elif (answers.get('spirit') in bundle.symptoms['vet_triggers']['spirit']
-          or answers.get('appetite') in bundle.symptoms['vet_triggers']['appetite']):
-        state = 'vet'
-    elif 'vet' in grades.values():
+    elif (
+        answers.get('spirit') in bundle.symptoms['vet_triggers']['spirit']
+        or answers.get('appetite') in bundle.symptoms['vet_triggers']['appetite']
+    ) or 'vet' in grades.values():
         state = 'vet'
     elif grades:
         state = 'observe'
     else:
         state = 'normal'
-    return {'state': state, 'redline_hit': bool(hits), 'redlines': hits,
-            'symptom_grades': grades, 'rules_version': bundle.rules_version}
+    return {
+        'state': state,
+        'redline_hit': bool(hits),
+        'redlines': hits,
+        'symptom_grades': grades,
+        'rules_version': bundle.rules_version,
+    }
 
 
 def symptoms_config(bundle: RulesBundle) -> dict:
@@ -228,10 +261,17 @@ def symptoms_config(bundle: RulesBundle) -> dict:
         'appetite_options': spec['appetite_options'],
         'vet_triggers': spec['vet_triggers'],
         'notes_max': spec['notes_max'],
-        'symptoms': [{'code': s['code'], 'label': s['label'], 'frequency': s['frequency'],
-                      'severe_label': s.get('severe_label')} for s in spec['symptoms']],
-        'redlines': [{'code': r['code'], 'label': r['label'],
-                      **({'options': r['options']} if 'options' in r else {}),
-                      **({'derived': r['derived']} if 'derived' in r else {})}
-                     for r in bundle.redlines['redlines']],
+        'symptoms': [
+            {'code': s['code'], 'label': s['label'], 'frequency': s['frequency'], 'severe_label': s.get('severe_label')}
+            for s in spec['symptoms']
+        ],
+        'redlines': [
+            {
+                'code': r['code'],
+                'label': r['label'],
+                **({'options': r['options']} if 'options' in r else {}),
+                **({'derived': r['derived']} if 'derived' in r else {}),
+            }
+            for r in bundle.redlines['redlines']
+        ],
     }

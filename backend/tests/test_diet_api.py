@@ -1,34 +1,48 @@
 """T12 饮食记录与喂养参考 API（FRD F07-1~4，附录 E）。"""
+
 from datetime import datetime, timedelta
 from unittest import TestCase
 
 from sqlalchemy.orm import Session
-
 from test_auth_api import AuthAPIFixture
+
 from app.core.security import utcnow
-from app.services.feeding import FEEDING_DISCLAIMER
 from app.models import DietRecord, WeightRecord
+from app.services.feeding import FEEDING_DISCLAIMER
 
 
 class DietFixture(AuthAPIFixture):
     def setUp(self):
         super().setUp()
         self.headers = {'Authorization': 'Bearer ' + self.login().json()['access_token']}
-        self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
-        self.pet = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).raise_for_status().json()['id']
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
+        self.pet = (
+            self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'})
+            .raise_for_status()
+            .json()['id']
+        )
 
     def post_diet(self, body, pet=None, headers=None):
-        return self.client.post(f'/api/v1/pets/{pet or self.pet}/diet',
-                                headers=self.headers if headers is None else headers, json=body)
+        return self.client.post(
+            f'/api/v1/pets/{pet or self.pet}/diet', headers=self.headers if headers is None else headers, json=body
+        )
 
     def get_diet(self, pet=None, **params):
         return self.client.get(f'/api/v1/pets/{pet or self.pet}/diet', headers=self.headers, params=params)
 
     def make_diet(self, food_type='dry', amount_g=50, fed_at=None, pet=None):
         with Session(self.engine) as db:
-            record = DietRecord(pet_id=pet or self.pet, food_type=food_type, amount_g=amount_g,
-                                kcal_est=round(amount_g * 3.8, 1) if food_type == 'dry' else (round(amount_g * 0.9, 1) if food_type == 'wet' else None),
-                                fed_at=fed_at or utcnow())
+            record = DietRecord(
+                pet_id=pet or self.pet,
+                food_type=food_type,
+                amount_g=amount_g,
+                kcal_est=round(amount_g * 3.8, 1)
+                if food_type == 'dry'
+                else (round(amount_g * 0.9, 1) if food_type == 'wet' else None),
+                fed_at=fed_at or utcnow(),
+            )
             db.add(record)
             db.commit()
             return record.id
@@ -42,6 +56,7 @@ class DietFixture(AuthAPIFixture):
 
     def other_headers(self):
         from app.services.identity import create_email_account, verify_email
+
         with Session(self.engine) as db:
             token = create_email_account(db, 'other@example.com', self.password, self.now)
             verify_email(db, token, self.now)
@@ -62,7 +77,9 @@ class DietRecordTests(DietFixture, TestCase):
         self.assertLess(abs((utcnow() - fed).total_seconds()), 120)
 
     def test_wet_snack_other_kcal(self):
-        self.assertEqual(self.post_diet({'food_type': 'wet', 'amount_g': 100}).raise_for_status().json()['kcal_est'], 90.0)
+        self.assertEqual(
+            self.post_diet({'food_type': 'wet', 'amount_g': 100}).raise_for_status().json()['kcal_est'], 90.0
+        )
         self.assertIsNone(self.post_diet({'food_type': 'snack', 'amount_g': 20}).raise_for_status().json()['kcal_est'])
         self.assertIsNone(self.post_diet({'food_type': 'other', 'amount_g': 20}).raise_for_status().json()['kcal_est'])
 
@@ -97,7 +114,10 @@ class DietRecordTests(DietFixture, TestCase):
         self.assertEqual(data['kcal_est'], 126.5)
 
     def test_requires_login_consent_and_ownership(self):
-        self.assertEqual(self.client.post(f'/api/v1/pets/{self.pet}/diet', json={'food_type': 'dry', 'amount_g': 10}).status_code, 401)
+        self.assertEqual(
+            self.client.post(f'/api/v1/pets/{self.pet}/diet', json={'food_type': 'dry', 'amount_g': 10}).status_code,
+            401,
+        )
         other = self.other_headers()
         self.assertEqual(self.post_diet({'food_type': 'dry', 'amount_g': 10}, headers=other).status_code, 404)
         self.assertEqual(self.client.get(f'/api/v1/pets/{self.pet}/diet', headers=other).status_code, 404)
@@ -117,7 +137,11 @@ class DietRecordTests(DietFixture, TestCase):
         self.assertEqual(data['count'], 2)
         self.assertEqual(data['total_g'], 120.0)
         self.assertEqual(data['total_kcal'], 90.0)
-        prev = self.get_diet(date=(local_today - timedelta(days=1)).isoformat(), tz_offset_minutes=offset).raise_for_status().json()
+        prev = (
+            self.get_diet(date=(local_today - timedelta(days=1)).isoformat(), tz_offset_minutes=offset)
+            .raise_for_status()
+            .json()
+        )
         self.assertEqual([i['id'] for i in prev['items']], [before])
 
     def test_totals_and_delete_recompute(self):
@@ -128,7 +152,9 @@ class DietRecordTests(DietFixture, TestCase):
         local_today = (utcnow() + timedelta(minutes=offset)).date()
         data = self.get_diet(date=local_today.isoformat(), tz_offset_minutes=int(offset)).raise_for_status().json()
         self.assertEqual((data['total_g'], data['total_kcal'], data['count']), (170.0, 280.0, 3))
-        self.assertEqual(self.client.delete(f'/api/v1/pets/{self.pet}/diet/{wet}', headers=self.headers).status_code, 204)
+        self.assertEqual(
+            self.client.delete(f'/api/v1/pets/{self.pet}/diet/{wet}', headers=self.headers).status_code, 204
+        )
         data = self.get_diet(date=local_today.isoformat(), tz_offset_minutes=int(offset)).raise_for_status().json()
         self.assertEqual((data['total_g'], data['total_kcal'], data['count']), (70.0, 190.0, 2))
 
@@ -142,7 +168,9 @@ class DietRecordTests(DietFixture, TestCase):
         self.assertEqual(len(limited['items']), 1)
 
     def test_delete_missing_is_404(self):
-        self.assertEqual(self.client.delete(f'/api/v1/pets/{self.pet}/diet/999999', headers=self.headers).status_code, 404)
+        self.assertEqual(
+            self.client.delete(f'/api/v1/pets/{self.pet}/diet/999999', headers=self.headers).status_code, 404
+        )
 
     def test_bad_date_param(self):
         self.assertEqual(self.get_diet(date='2026/11/19').status_code, 400)
@@ -161,8 +189,9 @@ class FeedingReferenceTests(DietFixture, TestCase):
 
     def test_ac_07_4_4kg_neutered_adult(self):
         self.make_weight(4.0)
-        self.client.patch(f'/api/v1/pets/{self.pet}', headers=self.headers,
-                          json={'birth_date': '2024-01-01', 'neutered': True}).raise_for_status()
+        self.client.patch(
+            f'/api/v1/pets/{self.pet}', headers=self.headers, json={'birth_date': '2024-01-01', 'neutered': True}
+        ).raise_for_status()
         data = self.reference().raise_for_status().json()
         self.assertTrue(data['has_weight'])
         self.assertEqual(data['weight_kg'], 4.0)
@@ -184,8 +213,10 @@ class FeedingReferenceTests(DietFixture, TestCase):
             self.assertEqual(response.json()['code'], 'CONFIG_UNAVAILABLE')
             self.assertEqual(self.reference().status_code, 503)
         finally:
-            from app.services.feeding import load_feeding_config
             from pathlib import Path
+
+            from app.services.feeding import load_feeding_config
+
             self.client.app.state.feeding_config = load_feeding_config(Path(__file__).resolve().parents[1] / 'rules')
 
 
@@ -195,11 +226,23 @@ class HealthOverviewTests(DietFixture, TestCase):
         self.post_diet({'food_type': 'wet', 'amount_g': 100}).raise_for_status()
         offset = 480
         local_today = (utcnow() + timedelta(minutes=offset)).date().isoformat()
-        health = self.client.get(f'/api/v1/pets/{self.pet}/health', headers=self.headers,
-                                 params={'tz_offset_minutes': offset}).raise_for_status().json()
+        health = (
+            self.client.get(
+                f'/api/v1/pets/{self.pet}/health', headers=self.headers, params={'tz_offset_minutes': offset}
+            )
+            .raise_for_status()
+            .json()
+        )
         daily = self.get_diet(date=local_today, tz_offset_minutes=offset).raise_for_status().json()
-        self.assertEqual(health['diet_today'], {'date': local_today, 'total_g': daily['total_g'],
-                                                'total_kcal': daily['total_kcal'], 'count': daily['count']})
+        self.assertEqual(
+            health['diet_today'],
+            {
+                'date': local_today,
+                'total_g': daily['total_g'],
+                'total_kcal': daily['total_kcal'],
+                'count': daily['count'],
+            },
+        )
         self.assertEqual(health['diet_today']['count'], 2)
 
     def test_latest_weight_in_health(self):
@@ -217,4 +260,5 @@ class HealthOverviewTests(DietFixture, TestCase):
 
 if __name__ == '__main__':
     import unittest
+
     unittest.main()

@@ -1,0 +1,29 @@
+# 统一各编辑器的缩进、换行与编码，避免格式噪音进入 commit。
+# VS Code / JetBrains / Sublime 均原生支持 EditorConfig。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Python / 后端脚本
+[*.{py,pyi}]
+indent_size = 4
+max_line_length = 120
+
+# 前端（TypeScript / React / 配置）
+[*.{ts,tsx,js,jsx,json,jsonc}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+# 文档与规则包：不强制行宽，允许手动换行保持段落完整
+[*.md]
+trim_trailing_whitespace = false
+indent_size = 2

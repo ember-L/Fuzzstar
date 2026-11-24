@@ -1,15 +1,21 @@
 """录音解读纯逻辑与 Provider（FRD F09-3/4；worker/API 集成见 test_audio_api.py）。"""
+
 import io
 import unittest
 import wave
 from pathlib import Path
 
-from app.services.audio import (AUDIO_FOOTER, AudioReplyError, build_audio_persona_messages,
-                       normalize_emotion, parse_audio_reply)
-from app.services.chat import EMOTIONS, load_chat_config
-from app.services.media import MAX_AUDIO_BYTES, valid_audio
 from app.providers.base import EmotionResult
 from app.providers.fake import FakeAudioProvider
+from app.services.audio import (
+    AUDIO_FOOTER,
+    AudioReplyError,
+    build_audio_persona_messages,
+    normalize_emotion,
+    parse_audio_reply,
+)
+from app.services.chat import EMOTIONS, load_chat_config
+from app.services.media import MAX_AUDIO_BYTES, valid_audio
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 FENCE = chr(96) * 3
@@ -71,12 +77,20 @@ class ParseAudioReplyTests(unittest.TestCase):
 class PersonaMessagesTests(unittest.TestCase):
     def setUp(self):
         self.config = load_chat_config(RULES_DIR)
-        self.pet = {'name': '团团', 'species': 'cat', 'breed': None, 'sex': 'unknown',
-                    'age_months': 24, 'neutered': True, 'body_type': 'standard'}
+        self.pet = {
+            'name': '团团',
+            'species': 'cat',
+            'breed': None,
+            'sex': 'unknown',
+            'age_months': 24,
+            'neutered': True,
+            'body_type': 'standard',
+        }
 
     def test_system_contains_emotion_and_contract(self):
-        messages = build_audio_persona_messages(self.pet, 'normal', 'happy', 0.82,
-                                                [{'role': 'user', 'content': '你好'}], self.config)
+        messages = build_audio_persona_messages(
+            self.pet, 'normal', 'happy', 0.82, [{'role': 'user', 'content': '你好'}], self.config
+        )
         self.assertEqual(messages[0]['role'], 'system')
         system = messages[0]['content']
         self.assertIn('团团', system)

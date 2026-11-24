@@ -1,15 +1,16 @@
 """占位资产下发与体型档案（FRD F03-4 / F02-1 体型扩展，AC-03-1）。"""
+
 import hashlib
 import unittest
 from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
+from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
-from app.services.identity import create_email_account, verify_email
 from app.models import MediaUpload
-from test_auth_api import AuthAPIFixture
+from app.services.identity import create_email_account, verify_email
 
 ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 
@@ -17,15 +18,25 @@ ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 class AvatarAssetsTests(AuthAPIFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
-        self.client.post('/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
+        self.client.post(
+            '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}
+        ).raise_for_status()
         self.pet_id = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '团团'}).json()['id']
 
     def make_media(self, pet_id):
         media_id = uuid4().hex
         with Session(self.engine) as db, db.begin():
-            db.add(MediaUpload(id=media_id, pet_id=pet_id, content_type='image/png', size_bytes=1024,
-                               expires_at=utcnow() + timedelta(minutes=10), version_id='version-1'))
+            db.add(
+                MediaUpload(
+                    id=media_id,
+                    pet_id=pet_id,
+                    content_type='image/png',
+                    size_bytes=1024,
+                    expires_at=utcnow() + timedelta(minutes=10),
+                    version_id='version-1',
+                )
+            )
         return media_id
 
     def submit(self, pet_id, media_id):
@@ -59,7 +70,7 @@ class AvatarAssetsTests(AuthAPIFixture, unittest.TestCase):
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'noconsent2@example.com', self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login('noconsent2@example.com').json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login("noconsent2@example.com").json()["access_token"]}'}
         response = self.client.get('/api/v1/avatar/placeholder-manifest', headers=headers)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()['code'], 'CONSENT_REQUIRED')
@@ -94,10 +105,12 @@ class AvatarAssetsTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(hashlib.sha256(response.content).hexdigest(), expected)
 
     def test_clip_whitelist_404(self):
-        for path in ('/api/v1/avatar/placeholders/v1/standard/jump.mp4',
-                     '/api/v1/avatar/placeholders/v9/standard/idle.mp4',
-                     '/api/v1/avatar/placeholders/v1/fat/idle.mp4',
-                     '/api/v1/avatar/placeholders/v1/standard/idle.txt'):
+        for path in (
+            '/api/v1/avatar/placeholders/v1/standard/jump.mp4',
+            '/api/v1/avatar/placeholders/v9/standard/idle.mp4',
+            '/api/v1/avatar/placeholders/v1/fat/idle.mp4',
+            '/api/v1/avatar/placeholders/v1/standard/idle.txt',
+        ):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 404, path)
 
@@ -111,7 +124,9 @@ class AvatarAssetsTests(AuthAPIFixture, unittest.TestCase):
         self.assertIn('/v1/standard/idle.mp4', placeholder['clips']['idle'])
 
     def test_submit_uses_pet_body_type(self):
-        pet_id = self.client.post('/api/v1/pets', headers=self.headers, json={'name': '胖胖', 'body_type': 'chubby'}).json()['id']
+        pet_id = self.client.post(
+            '/api/v1/pets', headers=self.headers, json={'name': '胖胖', 'body_type': 'chubby'}
+        ).json()['id']
         response = self.submit(pet_id, self.make_media(pet_id))
         self.assertEqual(response.status_code, 202)
         placeholder = response.json()['placeholder_manifest']

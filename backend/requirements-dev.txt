@@ -1,0 +1,9 @@
+# 本地开发与门禁所需依赖（生产镜像只装 requirements.txt）
+# 用法：python -m pip install -r requirements-dev.txt
+-r requirements.txt
+
+# 测试
+pytest>=8.0
+
+# 代码风格：lint + 格式化，规则见 pyproject.toml
+ruff>=0.17

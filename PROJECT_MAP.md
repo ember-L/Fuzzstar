@@ -1,7 +1,7 @@
 # 绒星 2.0 · 项目速查
 
 > 给 AI 与开发者快速定位用。事实源优先级：FRD（功能/验收/固定文案）> PRD（范围）> architecture（接口/数据结构）；本文只做索引与要点，冲突时回改本文。
-> 生成时间：2026-11-21。仓库：`https://github.com/ember-L/Fuzzstar`，本地：`D:\pjoct\AndroidStudioProjects\rongxing2.0`。
+> 生成时间：2026-11-21（2026-11-24 更新：管理台融合、team.env、ruff 规范）。仓库：`https://github.com/maodai5/RongXing`，本地：`P:\FuzzStar2.0\RongXing`。
 
 ## 一句话
 
@@ -41,9 +41,11 @@
 ## 后端速查（backend/，167 文件）
 
 - 入口：`app/main.py:58 create_app(settings)`、`app/main.py:108 create_dev_app()`。模块级 `app`（`:113`）只有 health，**业务联调必须用 factory**。
-- 13 个 router 注册于 `app/main.py:37-51`，统一前缀 `/api/v1`。鉴权四档：公开 / current_user / consented_user / owned_pet。
+- 配置：`app/core/env.py` 依次读 `backend/team.env`（团队共享，随仓库提交）→ `backend/.env`（个人覆盖，已忽略）→ 进程环境变量，后者优先；`DATABASE_URL` 缺失时由 `SERVER_HOST`+`DB_*` 自动拼出。
+- 15 个 router 注册于 `app/main.py`，统一前缀 `/api/v1`。鉴权四档：公开 / current_user / consented_user / owned_pet；管理台另加 `admin_user`（ADMIN_EMAILS 白名单）。
+- 运营管理台：`backend/admin/`（原生 JS 静态页，无构建）由 `app/routers/admin.py` 提供 `/api/v1/admin/*`，统计在 `app/services/admin_stats.py`，写操作落 `admin_audit_logs`（`app/models/admin.py`）。
 - 中间件：auth 限流（30/min/IP，仅 auth POST）、request 日志（X-Request-ID）、CORS（仅 localhost 开发源）。
-- 25 张表，按域分 `app/models/{user,pet,health,task,media,chat,tracker,platform}.py`。迁移 head = `20261119_15`（quota_denials）。
+- 27 张表，按域分 `app/models/{user,pet,health,task,media,chat,tracker,platform,admin}.py`。迁移 head = `20261122_16`（admin_audit_logs）。
 - 规则判定核心：`app/services/triage.py:184-218`（红线最先硬判 urgent → 基础项 vet → 症状最高档 → normal，纯函数可复现）；AI 建议 `advice.py`、健康分 `health.py:11-36`（读时衰减，observe 72h）。
 - 任务：`app/services/tasks.py` 幂等入队/租约 15min/最多 3 次；worker `app/worker.py`（arq，max_jobs=2，sweep 每 5s）。DB 为队列真源，Redis 宕不丢任务。
 - Provider：`app/providers/dashscope.py`（qwen-image-edit / wanx2.1-i2v-turbo / qwen-max / qwen-plus / qwen2-audio），`fake.py` 全链路假实现。
@@ -72,9 +74,11 @@
 ```sh
 # 后端门禁
 cd backend && python -m pytest -q
+python -m ruff check . && python -m ruff format --check .   # 需先 pip install ruff，规则见 pyproject.toml
 python -m unittest discover -s tests
 python -m scripts.ops_report --days 7
 python -m scripts.latency_sample --samples 200
+python -m scripts.create_admin --email admin@rongxing.app --password '<密码>'
 
 # 前端门禁
 cd mobile && npm run typecheck && npm run lint && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs

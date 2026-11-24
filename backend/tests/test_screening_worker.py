@@ -1,4 +1,5 @@
 """T10 worker screening_analysis：LLM 建议成功/禁词重试/失败降级模板 + ai_usage_logs。"""
+
 import asyncio
 import unittest
 from pathlib import Path
@@ -6,12 +7,12 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.services.advice import load_advice_templates
+from app import worker
 from app.models import AiUsageLog, Base, HealthScreening, Pet, ScreeningSymptom, Task, User
 from app.providers.fake import FakeLLMProvider
+from app.services.advice import load_advice_templates
 from app.services.tasks import enqueue_task
 from app.services.triage import load_rules
-from app import worker
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 GOOD_REPLY = '{"text": "建议观察精神与食欲变化,记录呕吐频次。", "tips": ["保证饮水", "24小时后复查"]}'
@@ -20,6 +21,7 @@ GOOD_REPLY = '{"text": "建议观察精神与食欲变化,记录呕吐频次。"
 def make_engine():
     from sqlalchemy import create_engine
     from sqlalchemy.pool import StaticPool
+
     engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     return engine
@@ -29,15 +31,29 @@ def seed_screening(engine, state='observe'):
     with Session(engine) as db, db.begin():
         db.add(User(id=1, nickname='测试用户'))
         db.add(Pet(id=1, user_id=1, name='团团', species='cat', status='active'))
-        screening = HealthScreening(pet_id=1, user_id=1, state=state, redline_hit=False,
-                                    spirit='slightly_down', appetite='decreased',
-                                    rules_version='sx-2026-11-19+rl-2026-11-19',
-                                    triage_json={'redlines': [], 'symptom_grades': {'vomiting': state}})
+        screening = HealthScreening(
+            pet_id=1,
+            user_id=1,
+            state=state,
+            redline_hit=False,
+            spirit='slightly_down',
+            appetite='decreased',
+            rules_version='sx-2026-11-19+rl-2026-11-19',
+            triage_json={'redlines': [], 'symptom_grades': {'vomiting': state}},
+        )
         db.add(screening)
         db.flush()
         screening_id = screening.id
-        db.add(ScreeningSymptom(screening_id=screening_id, symptom_code='vomiting',
-                                duration='2-12h', frequency='2-3', notes='饭后吐', severe=False))
+        db.add(
+            ScreeningSymptom(
+                screening_id=screening_id,
+                symptom_code='vomiting',
+                duration='2-12h',
+                frequency='2-3',
+                notes='饭后吐',
+                severe=False,
+            )
+        )
         task = enqueue_task(db, 1, 'screening_analysis', str(screening_id), {'screening_id': screening_id})
         return task.id, screening_id
 
@@ -50,8 +66,12 @@ class ScreeningWorkerTests(unittest.TestCase):
         self.rules = load_rules(RULES_DIR)
         self.task_id, self.screening_id = seed_screening(self.engine)
         self.llm = FakeLLMProvider(GOOD_REPLY)
-        self.ctx = {'engine': self.engine, 'llm_provider': self.llm,
-                    'advice_templates': self.templates, 'triage_rules': self.rules}
+        self.ctx = {
+            'engine': self.engine,
+            'llm_provider': self.llm,
+            'advice_templates': self.templates,
+            'triage_rules': self.rules,
+        }
 
     def screening(self):
         with Session(self.engine) as db:
@@ -113,6 +133,7 @@ class ScreeningWorkerTests(unittest.TestCase):
     def test_fallback_does_not_overwrite_existing_llm_advice(self):
         asyncio.run(worker.run_task(self.ctx, self.task_id))
         from app.services.advice import apply_template_fallback
+
         apply_template_fallback(self.engine, self.task_id, self.templates)
         self.assertEqual(self.screening().advice_json['source'], 'llm')
 

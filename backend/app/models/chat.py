@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,9 +27,9 @@ class ChatMessage(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey('chat_sessions.id'), nullable=False)
     role: Mapped[str] = mapped_column(String(8), nullable=False)
     kind: Mapped[str] = mapped_column(String(8), nullable=False)
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    audio_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    emotion_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    emotion_confidence: Mapped[Optional[float]] = mapped_column(Numeric(4, 3), nullable=True)
-    task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey('tasks.id'), nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    emotion_label: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    emotion_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String(32), ForeignKey('tasks.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())

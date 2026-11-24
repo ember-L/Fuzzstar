@@ -1,21 +1,38 @@
 """T17 F12-4: account deletion, login freeze and 15-day physical purge."""
+
 import unittest
 from datetime import timedelta
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
+from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
-from app.services.identity import create_email_account, verify_email
+from app.models import (
+    AiUsageLog,
+    AuthSession,
+    Base,
+    ChatMessage,
+    ChatSession,
+    Consent,
+    DeletionJob,
+    DietRecord,
+    HealthScreening,
+    MediaUpload,
+    Pet,
+    RefreshToken,
+    RequestIdempotency,
+    Task,
+    User,
+    UserCredential,
+    WeightRecord,
+)
 from app.services.consents import grant_consent
-from app.models import (AiUsageLog, AuthSession, Base, ChatMessage, ChatSession, Consent,
-                        DeletionJob, DietRecord, HealthScreening, MediaUpload, Pet,
-                        RefreshToken, RequestIdempotency, Task, User, UserCredential, WeightRecord)
+from app.services.identity import create_email_account, verify_email
 from app.services.privacy import PURGE_DELAY, purge_due, purge_user_data, request_deletion
 from app.services.sessions import create_session
 from app.services.tasks import enqueue_task
-from test_auth_api import AuthAPIFixture
 
 
 class FakePurgeClient:
@@ -122,30 +139,61 @@ class PurgeFixture(unittest.TestCase):
             db.add(pet)
             db.flush()
             self.pet_id = pet.id
-            media = MediaUpload(id='a' * 32, pet_id=self.pet_id, kind='photo', content_type='image/png',
-                                size_bytes=10, expires_at=self.now + timedelta(hours=1), version_id='mv1')
+            media = MediaUpload(
+                id='a' * 32,
+                pet_id=self.pet_id,
+                kind='photo',
+                content_type='image/png',
+                size_bytes=10,
+                expires_at=self.now + timedelta(hours=1),
+                version_id='mv1',
+            )
             db.add(media)
             task = enqueue_task(db, self.pet_id, 'avatar_batch', 'key-1', {'media_id': media.id})
             task.status = 'succeeded'
             task.result = {
                 'base_image': {'key': f'avatars/{self.pet_id}/{task.id}/base.png', 'version_id': 'bv1'},
                 'clips': {
-                    'idle': {'status': 'ready', 'key': f'avatars/{self.pet_id}/{task.id}/idle.mp4', 'version_id': 'cv1'},
+                    'idle': {
+                        'status': 'ready',
+                        'key': f'avatars/{self.pet_id}/{task.id}/idle.mp4',
+                        'version_id': 'cv1',
+                    },
                     'happy': {'status': 'failed'},
                 },
-                'ready_count': 1, 'usable': False,
+                'ready_count': 1,
+                'usable': False,
             }
             self.task_id = task.id
             chat = ChatSession(pet_id=self.pet_id, user_id=self.user_id)
             db.add(chat)
             db.flush()
             db.add(ChatMessage(session_id=chat.id, role='user', kind='text', content='你好', task_id=task.id))
-            db.add(HealthScreening(pet_id=self.pet_id, user_id=self.user_id, state='observe', spirit='normal',
-                                   appetite='normal', triage_json={}, rules_version='sx-1', task_id=task.id))
+            db.add(
+                HealthScreening(
+                    pet_id=self.pet_id,
+                    user_id=self.user_id,
+                    state='observe',
+                    spirit='normal',
+                    appetite='normal',
+                    triage_json={},
+                    rules_version='sx-1',
+                    task_id=task.id,
+                )
+            )
             db.add(DietRecord(pet_id=self.pet_id, food_type='dry', amount_g=50, fed_at=self.now))
             db.add(WeightRecord(pet_id=self.pet_id, weight_kg=4.0, measured_at=self.now))
-            db.add(AiUsageLog(user_id=self.user_id, task_id=task.id, provider='fake', model='fake',
-                              kind='llm', tokens_in=10, tokens_out=5))
+            db.add(
+                AiUsageLog(
+                    user_id=self.user_id,
+                    task_id=task.id,
+                    provider='fake',
+                    model='fake',
+                    kind='llm',
+                    tokens_in=10,
+                    tokens_out=5,
+                )
+            )
             db.add(RequestIdempotency(user_id=self.user_id, key='k1', request_hash='h1'))
             other = create_email_account(db, 'keep@example.com', 'Strong123', self.now)
             verify_email(db, other, self.now)
@@ -159,8 +207,9 @@ class PurgeFixture(unittest.TestCase):
 
     def purge(self, now=None, storage=None):
         with Session(self.engine) as db, db.begin():
-            return purge_user_data(db, self.user_id, storage=storage or self.storage,
-                                   now=now or self.purge_after + timedelta(seconds=1))
+            return purge_user_data(
+                db, self.user_id, storage=storage or self.storage, now=now or self.purge_after + timedelta(seconds=1)
+            )
 
 
 class PurgeTests(PurgeFixture):
@@ -179,9 +228,19 @@ class PurgeTests(PurgeFixture):
     def test_purge_removes_all_user_data_and_oss_objects(self):
         self.assertTrue(self.purge())
         with Session(self.engine) as db:
-            for model in (Task, MediaUpload, ChatSession, ChatMessage, HealthScreening,
-                          DietRecord, WeightRecord, Consent, AuthSession,
-                          RequestIdempotency, DeletionJob):
+            for model in (
+                Task,
+                MediaUpload,
+                ChatSession,
+                ChatMessage,
+                HealthScreening,
+                DietRecord,
+                WeightRecord,
+                Consent,
+                AuthSession,
+                RequestIdempotency,
+                DeletionJob,
+            ):
                 self.assertEqual(db.scalar(select(func.count()).select_from(model)), 0, model.__name__)
             self.assertEqual(db.scalar(select(func.count()).select_from(RefreshToken)), 0)
             self.assertIsNone(db.get(User, self.user_id))
@@ -223,7 +282,7 @@ class TrainingConsentTests(AuthAPIFixture, unittest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.headers = {'Authorization': f"Bearer {self.login().json()['access_token']}"}
+        self.headers = {'Authorization': f'Bearer {self.login().json()["access_token"]}'}
         self.client.post('/api/v1/consents', json={'privacy': 'p1', 'terms': 't1'}, headers=self.headers)
 
     def test_training_defaults_to_false(self):
@@ -247,7 +306,7 @@ class TrainingConsentTests(AuthAPIFixture, unittest.TestCase):
         with Session(self.engine) as db, db.begin():
             token = create_email_account(db, 'noconsent-training@example.com', self.password, self.now)
             verify_email(db, token, self.now)
-        headers = {'Authorization': f"Bearer {self.login('noconsent-training@example.com').json()['access_token']}"}
+        headers = {'Authorization': f'Bearer {self.login("noconsent-training@example.com").json()["access_token"]}'}
         response = self.client.post('/api/v1/consents/training', json={'granted': True}, headers=headers)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()['code'], 'CONSENT_REQUIRED')
@@ -256,8 +315,9 @@ class TrainingConsentTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.client.post('/api/v1/consents/training', json={'granted': True}).status_code, 401)
 
     def test_training_rejects_extra_fields(self):
-        response = self.client.post('/api/v1/consents/training', json={'granted': True, 'version': 'x'},
-                                    headers=self.headers)
+        response = self.client.post(
+            '/api/v1/consents/training', json={'granted': True, 'version': 'x'}, headers=self.headers
+        )
         self.assertEqual(response.status_code, 400)
 
 

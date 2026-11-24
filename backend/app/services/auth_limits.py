@@ -10,10 +10,15 @@ from app.models import AuthRateBucket
 
 def allow_auth_request(engine, secret: str, address: str, minute: datetime) -> bool:
     source = digest(secret.encode(), f'auth-ip:{address}'.encode(), 'sha256').hex()
-    increment = update(AuthRateBucket).where(
-        AuthRateBucket.source_hash == source, AuthRateBucket.minute == minute,
-        AuthRateBucket.requests < 30,
-    ).values(requests=AuthRateBucket.requests + 1)
+    increment = (
+        update(AuthRateBucket)
+        .where(
+            AuthRateBucket.source_hash == source,
+            AuthRateBucket.minute == minute,
+            AuthRateBucket.requests < 30,
+        )
+        .values(requests=AuthRateBucket.requests + 1)
+    )
     with Session(engine) as db, db.begin():
         if db.execute(increment).rowcount == 1:
             return True

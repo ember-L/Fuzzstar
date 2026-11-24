@@ -1,0 +1,61 @@
+# 绒星后端工程配置：Python 版本、代码风格与测试约定。
+# 装依赖：python -m pip install -r requirements-dev.txt（含 pytest + ruff）
+# 门禁：python -m ruff check . / python -m ruff format --check . / python -m pytest
+
+[project]
+name = "rongxing-backend"
+version = "2.0.0"
+description = "绒星 RongXing 后端：FastAPI + SQLAlchemy 2 + Alembic"
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    ".venv",
+    "admin",           # 运营管理台前端静态资源（HTML/CSS/JS），不归 Python 规则管
+    "assets",
+    "rules",
+    "migrations/versions",
+]
+
+[tool.ruff.lint]
+# 只启用"改完不会改变行为"的规则集：语法错误、未用变量、import 排序、现代化类型标注、可简化的写法。
+select = [
+    "E",    # pycodestyle 错误
+    "F",    # pyflakes：未定义名、未用 import/变量
+    "W",    # pycodestyle 告警
+    "I",    # isort：import 排序
+    "B",    # flake8-bugbear：常见陷阱
+    "C4",   # 推导式优化
+    "SIM",  # 可简化写法
+    "RUF",  # ruff 自有规则
+    "UP",   # pyupgrade：按 py311 现代化语法
+]
+ignore = [
+    "B008",    # FastAPI 的 Depends()/Query() 写在默认参数里是官方写法
+    "B904",    # except 里 raise 不强制 from exc，项目统一由 APIError 统一处理
+    "RUF012",  # 类级可变默认值，SQLAlchemy/Pydantic 里是有意为之
+    "SIM117",  # 允许 with 不合并，保持逐层可读
+    "E501",    # 中文注释/文案无法由格式化器折行，行宽交给 ruff format 管
+    "RUF001",  # 中文全角标点在字符串里是有意为之
+    "RUF002",  # 同上（docstring）
+    "RUF003",  # 同上（注释）
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "single"      # 项目统一使用单引号
+indent-style = "space"
+docstring-code-format = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:httpx.*",
+]

@@ -1,15 +1,15 @@
 """版本化动作映射（FRD 附录 C）。启动时加载：文件缺失 → None（接口 503），内容非法 → 快速失败。"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
 ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 
 
-def load_action_map(directory: Path) -> Optional[dict]:
+def load_action_map(directory: Path) -> dict | None:
     path = Path(directory) / 'action_map.yaml'
     if not path.is_file():
         return None
@@ -29,7 +29,11 @@ def load_action_map(directory: Path) -> Optional[dict]:
     if not isinstance(rules, list) or not rules:
         raise RuntimeError('action map must contain rules')
     for rule in rules:
-        if not isinstance(rule, dict) or rule.get('source') not in priority or not isinstance(rule.get('condition'), dict):
+        if (
+            not isinstance(rule, dict)
+            or rule.get('source') not in priority
+            or not isinstance(rule.get('condition'), dict)
+        ):
             raise RuntimeError('each rule needs a known source and a condition mapping')
         action = rule.get('action')
         values = action if isinstance(action, list) else [action]
