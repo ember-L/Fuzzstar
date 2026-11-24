@@ -17,6 +17,9 @@ from app.core.env import load_env
 from app.core.errors import APIError, api_error
 from app.core.middleware import auth_rate_limit
 from app.core.observability import request_log
+from app.routers.admin import api as admin_api
+from app.routers.admin import install_assets as install_admin_assets
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.avatar_assets import router as avatar_assets_router
 from app.routers.avatars import router as avatar_router
@@ -36,6 +39,8 @@ load_env()
 
 TITLE = '绒星 API（本地联调）'
 ROUTERS = (
+    admin_api,
+    admin_router,
     auth_router,
     pet_router,
     avatar_router,
@@ -84,10 +89,12 @@ def create_app(settings: Settings) -> FastAPI:
     instance.state.motion_config = settings.motion_config
     instance.state.chat_llm_provider = settings.chat_llm_provider
     instance.state.placeholder_library = settings.placeholder_library
+    instance.state.admin_emails = settings.admin_emails
 
     instance.get('/api/v1/health')(health)
     for router in ROUTERS:
         instance.include_router(router)
+    install_admin_assets(instance)
     instance.middleware('http')(auth_rate_limit)
     instance.middleware('http')(request_log)
     instance.add_middleware(

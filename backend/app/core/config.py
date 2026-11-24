@@ -45,6 +45,7 @@ class Settings:
     motion_config: Any
     chat_llm_provider: Any
     placeholder_library: Any
+    admin_emails: frozenset[str]
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> 'Settings':
@@ -74,6 +75,14 @@ class Settings:
             if parsed.scheme != 'https' or not parsed.hostname or parsed.username is not None:
                 raise RuntimeError('Policy URLs must be HTTPS links')
 
+        admin_emails = frozenset(
+            item.strip().lower() for item in env.get('ADMIN_EMAILS', '').split(',')
+            if item.strip()
+        )
+        for email in admin_emails:
+            if '@' not in email or len(email) > 128:
+                raise RuntimeError('ADMIN_EMAILS must be a comma-separated list of email addresses')
+
         rules_dir = Path(env.get('RULES_DIR') or BACKEND_ROOT / 'rules')
         placeholder_dir = Path(env.get('PLACEHOLDER_DIR') or BACKEND_ROOT / 'assets' / 'placeholders')
         dashscope_key = env.get('DASHSCOPE_API_KEY')
@@ -91,4 +100,5 @@ class Settings:
             motion_config=load_motion_config(rules_dir),
             chat_llm_provider=DashScopeLLMProvider(dashscope_key, model='qwen-plus') if dashscope_key else None,
             placeholder_library=load_library(placeholder_dir),
+            admin_emails=admin_emails,
         )

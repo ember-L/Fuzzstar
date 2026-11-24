@@ -71,7 +71,13 @@ def verify_email(session: Session, token: str, now: datetime) -> None:
         raise InvalidVerification()
 
 
-def login_email(session: Session, email: str, password: str) -> User:
+def login_email(session: Session, email: str, password: str, *,
+                allow_unverified: bool = False) -> User:
+    """Authenticate with email + password.
+
+    ``allow_unverified`` lets whitelisted console admins sign in without
+    completing the email verification flow; regular accounts must still verify.
+    """
     try:
         email = normalize_email(email)
     except ValueError as exc:
@@ -86,6 +92,6 @@ def login_email(session: Session, email: str, password: str) -> User:
     user = session.get(User, credential.user_id)
     if user is None or user.status != 'active':
         raise InvalidCredentials()
-    if credential.verified_at is None:
+    if credential.verified_at is None and not allow_unverified:
         raise UnverifiedEmail()
     return user

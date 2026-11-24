@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.errors import APIError
 from app.core.security import bearer
-from app.models import AuthSession, User
+from app.models import AuthSession, User, UserCredential
 from app.services.consents import consent_state
 from app.services.pets import PetNotFound, get_pet
 
@@ -52,6 +52,25 @@ def deletion_user(request: Request, credentials: Optional[HTTPAuthorizationCrede
 def consented_user(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
     if not consent_state(db, user, request)['granted']:
         raise APIError(403, 'CONSENT_REQUIRED', '请先阅读并同意当前版本的协议')
+    return user
+
+
+def admin_user(request: Request, user: User = Depends(current_user),
+               db: Session = Depends(get_db)) -> User:
+    """Require an account whose email is listed in ADMIN_EMAILS.
+
+    Email verification is intentionally not required here: admins authenticate
+    with the account password and the ADMIN_EMAILS whitelist is the trust
+    boundary.
+    """
+    admins = request.app.state.admin_emails
+    if not admins:
+        raise APIError(503, 'ADMIN_NOT_CONFIGURED', '管理员后台尚未配置 ADMIN_EMAILS')
+    email = db.scalar(select(UserCredential.identifier).where(
+        UserCredential.user_id == user.id, UserCredential.type == 'email',
+    ))
+    if email is None or email.lower() not in admins:
+        raise APIError(403, 'ADMIN_REQUIRED', '当前账号没有管理员权限')
     return user
 
 

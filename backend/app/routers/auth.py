@@ -136,8 +136,12 @@ def confirm_email(data: VerifyEmailInput, response: Response, db: Session = Depe
 
 @router.post('/auth/login', response_model=TokenPair)
 def login(data: LoginInput, request: Request, response: Response, db: Session = Depends(get_db)):
+    # Console admins listed in ADMIN_EMAILS may sign in with just the account
+    # password; their email does not need to have completed verification.
+    admins = request.app.state.admin_emails
+    allow_unverified = bool(admins) and data.email.strip().lower() in admins
     try:
-        user = login_email(db, data.email, data.password)
+        user = login_email(db, data.email, data.password, allow_unverified=allow_unverified)
     except UnverifiedEmail:
         return api_error(401, 'EMAIL_UNVERIFIED', '请先验证邮箱')
     except InvalidCredentials:

@@ -12,3 +12,8 @@ backend/.env
 # 本地生成的萌宠动图资产：体积大不入库，由离线流程产出并落对象存储
 backend/assets/motion/
 backend/tmp_out/
+# 管理台 logo 图片（覆盖全局 *.png 排除）
+!backend/admin/assets/*.png
+
+# 技能大赛逐字稿不上传
+docs/*逐字稿.md
