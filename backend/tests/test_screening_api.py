@@ -1,4 +1,5 @@
 from datetime import timedelta
+import os
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -24,6 +25,9 @@ PREPARATION = [
 class ScreeningFixture(AuthAPIFixture):
     def setUp(self):
         super().setUp()
+        # 测试固定走异步入队（验证 worker 行为），不受开发环境 SCREENING_ADVICE_MODE=sync 影响
+        os.environ['SCREENING_ADVICE_MODE'] = 'async'
+        self.addCleanup(os.environ.pop, 'SCREENING_ADVICE_MODE', None)
         self.headers = {'Authorization': 'Bearer ' + self.login().json()['access_token']}
         self.client.post(
             '/api/v1/consents', headers=self.headers, json={'privacy': 'p1', 'terms': 't1'}

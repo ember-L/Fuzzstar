@@ -1,5 +1,6 @@
 """健康初筛：规则硬判定 + 存档 + 存证媒体 + LLM 建议入队与降级（FRD F05-1~8）。"""
 
+import os
 import re
 from datetime import timedelta
 
@@ -13,7 +14,7 @@ from app.core.deps import consented_user, owned_pet
 from app.core.errors import APIError
 from app.core.security import utcnow
 from app.models import HealthEvent, HealthScreening, MediaUpload, Pet, ScreeningMedia, ScreeningSymptom, Task, User
-from app.services.advice import template_advice
+from app.services.advice import build_advice_messages, parse_advice, template_advice
 from app.services.media import storage_unavailable
 from app.services.quota import quota_gate
 from app.services.tasks import enqueue_task
@@ -70,6 +71,51 @@ def _advice_view(screening: HealthScreening, task: Task | None, templates: dict)
     return {'status': 'pending', 'source': None, 'text': None, 'tips': None}
 
 
+def _advice_sync_enabled() -> bool:
+    """是否同步生成建议。默认 async（入队等 worker，测试/生产兼容）；
+    开发环境在 team.env 设 SCREENING_ADVICE_MODE=sync，直连智谱立即可用。"""
+    return os.environ.get('SCREENING_ADVICE_MODE', 'async').lower() == 'sync'
+
+
+async def _generate_advice_sync(llm, result, data, bundle, templates):
+    """同步生成护理建议（开发环境无 worker 时直连智谱，~2s 出结果）。
+
+    成功返回 (llm_advice_json, text)；无 provider 或调用失败降级模板返回 (template_json, None)。
+    """
+    if llm is None:
+        return template_advice(templates, result['state']), None
+    labels = {s['code']: s['label'] for s in bundle.symptoms['symptoms']}
+    info = {
+        'state': result['state'],
+        'spirit': data.spirit,
+        'appetite': data.appetite,
+        'rules_version': result['rules_version'],
+    }
+    symptoms = [
+        {
+            'code': s.code,
+            'label': labels.get(s.code, s.code),
+            'duration': s.duration,
+            'frequency': s.frequency,
+            'notes': s.notes,
+            'severe': s.severe,
+            'grade': (result.get('symptom_grades') or {}).get(s.code),
+        }
+        for s in data.symptoms
+    ]
+    try:
+        raw = await llm.chat(build_advice_messages(info, symptoms), temperature=0.3, max_tokens=800)
+        advice = parse_advice(raw)
+        return {
+            'source': 'llm',
+            'text': advice['text'],
+            'tips': advice['tips'],
+            'model': getattr(llm, 'model', ''),
+        }, advice['text']
+    except Exception:
+        return template_advice(templates, result['state']), None
+
+
 class SymptomInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -120,7 +166,7 @@ def symptom_config(
 
 
 @router.post('/pets/{pet_id}/screenings', status_code=201)
-def submit_screening(
+async def submit_screening(
     data: ScreeningInput,
     request: Request,
     response: Response,
@@ -222,7 +268,17 @@ def submit_screening(
     if result['state'] == 'urgent':
         # 红线零 LLM：立即持久化模板建议，不建任务、不记用量（AC-05-4）。
         screening.advice_json = template_advice(templates, result['state'])
+    elif _advice_sync_enabled():
+        # 同步模式（开发/无 worker）：直连智谱 ~2s 出结果，不依赖 Redis/S3/worker。
+        # 成功写 llm_advice + advice_json(source=llm)；失败降级模板。task_id 保持 None → 前端直接显示。
+        llm = getattr(request.app.state, 'chat_llm_provider', None)
+        advice, llm_text = await _generate_advice_sync(llm, result, data, bundle, templates)
+        if llm_text is not None:
+            screening.llm_advice = llm_text
+        screening.advice_json = advice
+        screening.task_id = None
     else:
+        # 异步模式（生产/测试）：入队等 arq worker 消费。
         task = enqueue_task(db, pet.id, 'screening_analysis', str(screening.id), {'screening_id': screening.id})
         screening.task_id = task.id
     db.commit()
