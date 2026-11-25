@@ -2,6 +2,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Screen } from '../../../components/Screen';
+import { ThinkingBubble } from '../../../components/ThinkingBubble';
 import { api } from '../../../lib/api';
 import { DISCLAIMER, STATE_LABELS, stateTone } from '../../../lib/screening';
 import { cancelPetRechecks, scheduleRecheck } from '../../../lib/notifications';
@@ -159,7 +160,11 @@ export default function ScreeningResultScreen() {
       {detail.advice && (detail.advice.text || detail.advice.status === 'pending') ? (
         <View style={styles.card}>
           <Text style={styles.section}>AI 护理建议</Text>
-          {adviceNotice(detail.advice) ? <Text style={styles.adviceNotice}>{adviceNotice(detail.advice)}</Text> : null}
+          {detail.advice.status === 'pending' ? (
+            <ThinkingBubble />
+          ) : adviceNotice(detail.advice) ? (
+            <Text style={styles.adviceNotice}>{adviceNotice(detail.advice)}</Text>
+          ) : null}
           {detail.advice.text ? <Text style={styles.body}>{detail.advice.text}</Text> : null}
           {(detail.advice.tips ?? []).map((tip, index) => (
             <Text key={tip} style={styles.tip}>{`${index + 1}. ${tip}`}</Text>

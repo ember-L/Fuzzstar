@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from app.core.env import load_env
 from app.providers.dashscope import DashScopeLLMProvider
+from app.providers.zhipu import ZhipuLLMProvider
 from app.services.advice import load_advice_templates
 from app.services.chat import load_chat_config
 from app.services.feeding import load_feeding_config
@@ -86,6 +87,14 @@ class Settings:
         rules_dir = Path(env.get('RULES_DIR') or BACKEND_ROOT / 'rules')
         placeholder_dir = Path(env.get('PLACEHOLDER_DIR') or BACKEND_ROOT / 'assets' / 'placeholders')
         dashscope_key = env.get('DASHSCOPE_API_KEY')
+        zhipu_key = env.get('ZHIPU_API_KEY')
+        # 优先智谱 glm-4-flash（最快速无思考）；DashScope 作为备选
+        if zhipu_key:
+            chat_llm_provider = ZhipuLLMProvider(zhipu_key, model=env.get('ZHIPU_MODEL', 'glm-4-flash'))
+        elif dashscope_key:
+            chat_llm_provider = DashScopeLLMProvider(dashscope_key, model='qwen-turbo')
+        else:
+            chat_llm_provider = None
         return cls(
             database_url=database_url,
             jwt_secret=jwt_secret,
@@ -98,7 +107,7 @@ class Settings:
             feeding_config=load_feeding_config(rules_dir),
             chat_config=load_chat_config(rules_dir),
             motion_config=load_motion_config(rules_dir),
-            chat_llm_provider=DashScopeLLMProvider(dashscope_key, model='qwen-plus') if dashscope_key else None,
+            chat_llm_provider=chat_llm_provider,
             placeholder_library=load_library(placeholder_dir),
             admin_emails=admin_emails,
         )

@@ -98,9 +98,18 @@ def create_app(settings: Settings) -> FastAPI:
     instance.middleware('http')(request_log)
     instance.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r'http://(?:localhost|127\.0\.0\.1):[0-9]+',
+        allow_origin_regex=(
+            r'https?://('
+            r'localhost|127\.0\.0\.1|0\.0\.0\.0|'
+            r'10\.\d{1,3}\.\d{1,3}\.\d{1,3}|'
+            r'192\.168\.\d{1,3}\.\d{1,3}|'
+            r'172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|'
+            r'[a-fA-F0-9:]+'  # IPv6
+            r'):[0-9]+'
+        ),
         allow_methods=['GET', 'POST', 'PATCH', 'DELETE'],
         allow_headers=['Authorization', 'Content-Type', 'Idempotency-Key'],
+        allow_credentials=True,
     )
 
     @instance.exception_handler(APIError)

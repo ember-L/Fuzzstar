@@ -67,7 +67,13 @@ class DashScopeLLMProvider:
         payload = {
             'model': self.model,
             'input': {'messages': messages},
-            'parameters': {'result_format': 'message', 'temperature': temperature, 'max_tokens': max_tokens},
+            'parameters': {
+                'result_format': 'message',
+                'temperature': temperature,
+                'max_tokens': max_tokens,
+                # 关闭深度思考，追求最快响应速度
+                'enable_thinking': False,
+            },
         }
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             response = await client.post(

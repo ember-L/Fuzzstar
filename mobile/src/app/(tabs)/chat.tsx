@@ -8,6 +8,7 @@ import { ActivityIndicator, AppState, Image, KeyboardAvoidingView, Platform, Pre
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
 import { Icon } from '../../components/ui/Icon';
+import { ThinkingBubble } from '../../components/ThinkingBubble';
 import { api } from '../../lib/api';
 import { AUDIO_FOOTER, AUDIO_MAX_SECONDS, confidenceText, emotionLabel, recordingContentType, validateDuration } from '../../lib/audio-message';
 import { CHAT_INPUT_MAX, chatQueueItem, confirmSend, localPendingId, parseChatBody, toCachedMessage, validateChatInput, type ChatGuidance, type ChatMessage } from '../../lib/chat';
@@ -350,6 +351,7 @@ export default function ChatScreen() {
             </View>
           </View>
         ))}
+        {busy ? <ThinkingBubble /> : null}
       </ScrollView>
       <Text style={styles.audioFooter}>{AUDIO_FOOTER}</Text>
       {recorderState.isRecording ? (
