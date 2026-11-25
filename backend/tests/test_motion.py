@@ -296,11 +296,10 @@ class MotionAPITests(AuthAPIFixture, unittest.TestCase):
 
     def test_requires_login_and_consent(self):
         self.assertEqual(self.submit(headers={}).status_code, 401)
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'noconsent-motion@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'noconsent-motion@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("noconsent-motion@example.com").json()["access_token"]}'}
         response = self.submit(headers=headers)
         self.assertEqual(response.status_code, 403)
@@ -308,11 +307,10 @@ class MotionAPITests(AuthAPIFixture, unittest.TestCase):
 
     def test_unknown_or_foreign_pet_is_not_found(self):
         self.assertEqual(self.submit(pet_id=999999).status_code, 404)
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'other-motion@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other-motion@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("other-motion@example.com").json()["access_token"]}'}
         self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
         self.assertEqual(self.submit(pet_id=self.pet_id, headers=headers).status_code, 404)

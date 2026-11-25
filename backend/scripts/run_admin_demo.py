@@ -68,7 +68,7 @@ def seed_demo_data() -> None:
         UserCredential,
         WeightRecord,
     )
-    from app.services.identity import create_email_account, verify_email
+    from app.services.identity import create_email_account
     from app.services.pets import PetInput, create_pet
     from scripts.seed_demo import seed_demo
 
@@ -96,8 +96,7 @@ def seed_demo_data() -> None:
         ]
         owners = []
         for index, (nickname, email) in enumerate(DEMO_PET_OWNERS):
-            token = create_email_account(db, email, 'Owner12345', now)
-            verify_email(db, token, now)
+            create_email_account(db, email, 'Owner12345', now)
             owner = db.scalar(
                 select(User)
                 .join(

@@ -1,11 +1,10 @@
 import hashlib
-import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from email_validator import EmailNotValidError, validate_email
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import User, UserCredential
@@ -14,14 +13,6 @@ password_hasher = PasswordHasher()
 
 
 class InvalidCredentials(Exception):
-    pass
-
-
-class UnverifiedEmail(InvalidCredentials):
-    pass
-
-
-class InvalidVerification(Exception):
     pass
 
 
@@ -43,9 +34,8 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def create_email_account(
-    session: Session, email: str, password: str, now: datetime, *, verification_token: str | None = None
-) -> str:
+def create_email_account(session: Session, email: str, password: str, now: datetime) -> User:
+    """Create an email account that is immediately usable (no verification step)."""
     email = normalize_email(email)
     if (
         not 8 <= len(password) <= 128
@@ -60,7 +50,6 @@ def create_email_account(
         is not None
     ):
         raise EmailAlreadyRegistered('email already registered')
-    token = verification_token if verification_token is not None else secrets.token_urlsafe(32)
     user = User(nickname='猫咪主人')
     session.add(user)
     session.flush()
@@ -70,35 +59,15 @@ def create_email_account(
             type='email',
             identifier=email,
             secret_hash=password_hasher.hash(password),
-            verification_hash=token_hash(token),
-            verification_expires_at=now + timedelta(hours=24),
+            verified_at=now,
         )
     )
     session.flush()
-    return token
+    return user
 
 
-def verify_email(session: Session, token: str, now: datetime) -> None:
-    result = session.execute(
-        update(UserCredential)
-        .where(
-            UserCredential.type == 'email',
-            UserCredential.verification_hash == token_hash(token),
-            UserCredential.verification_expires_at > now,
-            UserCredential.verified_at.is_(None),
-        )
-        .values(verified_at=now, verification_hash=None, verification_expires_at=None)
-    )
-    if result.rowcount != 1:
-        raise InvalidVerification()
-
-
-def login_email(session: Session, email: str, password: str, *, allow_unverified: bool = False) -> User:
-    """Authenticate with email + password.
-
-    ``allow_unverified`` lets whitelisted console admins sign in without
-    completing the email verification flow; regular accounts must still verify.
-    """
+def login_email(session: Session, email: str, password: str) -> User:
+    """Authenticate with email + password."""
     try:
         email = normalize_email(email)
     except ValueError as exc:
@@ -115,6 +84,4 @@ def login_email(session: Session, email: str, password: str, *, allow_unverified
     user = session.get(User, credential.user_id)
     if user is None or user.status != 'active':
         raise InvalidCredentials()
-    if credential.verified_at is None and not allow_unverified:
-        raise UnverifiedEmail()
     return user

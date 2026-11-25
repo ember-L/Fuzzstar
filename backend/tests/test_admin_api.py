@@ -28,7 +28,7 @@ from app.models import (
     UserCredential,
     WeightRecord,
 )
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.pets import PetInput, create_pet
 
 ADMIN_EMAIL = 'ops@example.com'
@@ -64,8 +64,7 @@ class AdminAPIFixture:
         self.addCleanup(self.client.__exit__, None, None, None)
 
     def _user(self, db, email, password, *, nickname, status='active'):
-        token = create_email_account(db, email, password, self.now)
-        verify_email(db, token, self.now)
+        create_email_account(db, email, password, self.now)
         user = db.scalar(
             select(User)
             .join(

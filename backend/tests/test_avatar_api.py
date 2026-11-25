@@ -8,7 +8,7 @@ from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
 from app.models import MediaUpload, Task
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.tasks import claim_task, finish_task
 
 
@@ -45,8 +45,7 @@ class AvatarAPITests(AuthAPIFixture, unittest.TestCase):
 
     def verified_account(self, email, consent=True):
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, email, self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, email, self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login(email).json()["access_token"]}'}
         if consent:
             self.client.post(

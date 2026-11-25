@@ -33,7 +33,7 @@ from app.providers.fake import FakeAudioProvider, FakeImageProvider, FakeLLMProv
 from app.services.advice import load_advice_templates
 from app.services.avatars import ACTIONS, S3Assets
 from app.services.chat import load_chat_config
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.media import PhotoStorage
 from app.services.privacy import purge_due
 from app.services.triage import load_rules
@@ -54,8 +54,7 @@ class E2ESmokeTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(engine.dispose)
         Base.metadata.create_all(engine)
         with Session(engine) as db, db.begin():
-            token = create_email_account(db, 'e2e@example.com', 'Strong123', utcnow())
-            verify_email(db, token, utcnow())
+            create_email_account(db, 'e2e@example.com', 'Strong123', utcnow())
         with patch.dict(
             os.environ,
             {

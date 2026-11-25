@@ -20,7 +20,7 @@ from app.models.platform import (
 )
 from app.models.task import Task
 from app.models.tracker import DietRecord, WeightRecord
-from app.models.user import AuthRateBucket, AuthSession, Consent, RefreshToken, User, UserCredential, VerificationMail
+from app.models.user import AuthRateBucket, AuthSession, Consent, RefreshToken, User, UserCredential
 
 __all__ = [
     'AdminAuditLog',
@@ -48,6 +48,5 @@ __all__ = [
     'UsageCounter',
     'User',
     'UserCredential',
-    'VerificationMail',
     'WeightRecord',
 ]

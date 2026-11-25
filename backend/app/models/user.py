@@ -1,4 +1,4 @@
-"""Accounts, credentials, sessions and verification mail."""
+"""Accounts, credentials, sessions and rate limiting."""
 
 from __future__ import annotations
 
@@ -30,8 +30,6 @@ class UserCredential(Base):
     identifier: Mapped[str] = mapped_column(String(128), nullable=False)
     secret_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    verification_hash: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
-    verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Consent(Base):
@@ -61,16 +59,6 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class VerificationMail(Base):
-    __tablename__ = 'verification_mail'
-
-    credential_id: Mapped[int] = mapped_column(ForeignKey('user_credentials.id', ondelete='CASCADE'), primary_key=True)
-    nonce: Mapped[str] = mapped_column(String(48), nullable=False)
-    queued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-    failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class AuthRateBucket(Base):

@@ -10,7 +10,7 @@ from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
 from app.models import MediaUpload
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 
 ACTIONS = ('idle', 'happy', 'sad', 'sick', 'crouch', 'look_left', 'look_right')
 
@@ -68,8 +68,7 @@ class AvatarAssetsTests(AuthAPIFixture, unittest.TestCase):
 
     def test_placeholder_manifest_requires_consent(self):
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'noconsent2@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'noconsent2@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("noconsent2@example.com").json()["access_token"]}'}
         response = self.client.get('/api/v1/avatar/placeholder-manifest', headers=headers)
         self.assertEqual(response.status_code, 403)

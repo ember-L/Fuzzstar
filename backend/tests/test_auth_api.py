@@ -2,10 +2,8 @@ import os
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from smtplib import SMTPException
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
 
 import jwt
 from fastapi.testclient import TestClient
@@ -14,8 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import main
 from app.models import Base
-from app.services.identity import create_email_account, verify_email
-from app.services.mail_worker import deliver_due
+from app.services.identity import create_email_account
 from app.services.sessions import create_session
 from app.services.tasks import claim_task, enqueue_task, finish_task
 
@@ -42,9 +39,7 @@ class AuthAPIFixture:
         Base.metadata.create_all(self.engine)
         self.now = datetime.now(UTC).replace(tzinfo=None)
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, self.email, self.password, self.now)
-            verify_email(db, token, self.now)
-            create_email_account(db, 'unverified@example.com', self.password, self.now)
+            create_email_account(db, self.email, self.password, self.now)
         with patch.dict(
             os.environ,
             {
@@ -89,16 +84,16 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(profile.status_code, 200)
         self.assertEqual(profile.json(), {'id': int(claims['sub']), 'nickname': '猫咪主人'})
 
-    def test_email_verification_hint_requires_correct_password(self):
-        for email, password, code in (
-            ('unverified@example.com', self.password, 'EMAIL_UNVERIFIED'),
-            ('unverified@example.com', 'Wrong123', 'AUTH_REQUIRED'),
-            ('missing@example.com', self.password, 'AUTH_REQUIRED'),
+    def test_login_rejects_wrong_password_and_unknown_email(self):
+        for email, password in (
+            (self.email, 'Wrong123'),
+            ('missing@example.com', self.password),
         ):
-            with self.subTest(email=email, code=code):
+            with self.subTest(email=email):
                 response = self.login(email, password)
                 self.assertEqual(response.status_code, 401)
-                self.assertEqual(response.json()['code'], code)
+                self.assertEqual(response.json()['code'], 'AUTH_REQUIRED')
+
 
     def test_refresh_replay_revokes_access_and_refresh_but_not_other_login(self):
         first = self.login().json()
@@ -135,64 +130,17 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
             },
         )
 
-    def test_registration_requires_confirmation_before_login(self):
-        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
-            response = self.register('New@Example.com')
-            self.assertEqual(response.status_code, 202)
-            client = smtp.return_value.__enter__.return_value
-            client.send_message.assert_not_called()
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=1)), 1)
-            message = client.send_message.call_args.args[0]
-            self.assertEqual(message['To'], 'new@example.com')
-            link = urlsplit(message.get_content().splitlines()[2])
-            self.assertEqual(link.query, '')
-            token = parse_qs(link.fragment)['token'][0]
-            self.assertNotIn(token, response.text)
-            self.assertEqual(self.register('new@example.com').json(), response.json())
-            self.assertEqual(client.send_message.call_count, 1)
-        preview = self.client.get(link.path)
-        self.assertEqual(preview.status_code, 200)
-        self.assertEqual(preview.headers['cache-control'], 'no-store')
-        self.assertIn('确认验证', preview.text)
-        self.assertEqual(self.login('new@example.com').json()['code'], 'EMAIL_UNVERIFIED')
-        self.assertEqual(self.client.post(link.path, json={'token': token}).status_code, 200)
+    def test_register_creates_account_and_signs_in_immediately(self):
+        response = self.register('New@Example.com')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['token_type'], 'bearer')
+        profile = self.me(response.json()['access_token'])
+        self.assertEqual(profile.status_code, 200)
+        self.assertEqual(profile.json()['nickname'], '猫咪主人')
+        duplicate = self.register('new@example.com')
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(duplicate.json()['code'], 'EMAIL_REGISTERED')
         self.assertEqual(self.login('new@example.com').status_code, 200)
-        self.assertEqual(self.client.post(link.path, json={'token': token}).status_code, 400)
-
-    def test_mail_failure_is_retried_with_same_link(self):
-        email = 'retry@example.com'
-        self.assertEqual(self.register(email).status_code, 202)
-        self.assertEqual(self.login(email).json()['code'], 'EMAIL_UNVERIFIED')
-        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
-            deliver = smtp.return_value.__enter__.return_value.send_message
-            deliver.side_effect = SMTPException('internal failure')
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=1)), 0)
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=2)), 0)
-            deliver.side_effect = None
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=32)), 1)
-            self.assertEqual(deliver.call_count, 2)
-            self.assertEqual(deliver.call_args_list[0].args[0].get_content(), deliver.call_args.args[0].get_content())
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=33)), 0)
-
-    def test_resend_requires_password_and_wait_and_invalidates_old_link(self):
-        email = 'resend@example.com'
-        self.assertEqual(self.register(email).status_code, 202)
-        path = '/api/v1/auth/resend-verification'
-        with patch.dict(os.environ, self.smtp_settings), patch('app.services.mail.smtplib.SMTP_SSL') as smtp:
-            deliver = smtp.return_value.__enter__.return_value.send_message
-            deliver_due(self.engine, self.key, self.now + timedelta(seconds=1))
-            old = parse_qs(urlsplit(deliver.call_args.args[0].get_content().splitlines()[2]).fragment)['token'][0]
-            data = {'email': email, 'password': self.password}
-            self.assertEqual(self.client.post(path, json=data).status_code, 202)
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=2)), 0)
-            with patch('app.routers.auth.utcnow', return_value=self.now + timedelta(seconds=65)):
-                self.assertEqual(self.client.post(path, json={**data, 'password': 'Wrong123'}).status_code, 202)
-                self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=65)), 0)
-                self.assertEqual(self.client.post(path, json=data).status_code, 202)
-            self.assertEqual(deliver_due(self.engine, self.key, self.now + timedelta(seconds=66)), 1)
-            new = parse_qs(urlsplit(deliver.call_args.args[0].get_content().splitlines()[2]).fragment)['token'][0]
-        self.assertEqual(self.client.post('/api/v1/auth/verify-email', json={'token': old}).status_code, 400)
-        self.assertEqual(self.client.post('/api/v1/auth/verify-email', json={'token': new}).status_code, 200)
 
     def test_ip_limit_is_persisted_and_returns_retry_after(self):
         with patch('app.core.middleware.utcnow', return_value=self.now.replace(second=10, microsecond=0)):
@@ -213,15 +161,6 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
             response = self.register(email, password)
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()['code'], 'VALIDATION_ERROR')
-
-    def test_expired_email_verification_is_rejected(self):
-        email = 'expired@example.com'
-        with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, email, self.password, self.now - timedelta(hours=25))
-        response = self.client.post('/api/v1/auth/verify-email', json={'token': token})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()['code'], 'VERIFICATION_INVALID')
-        self.assertEqual(self.login(email).json()['code'], 'EMAIL_UNVERIFIED')
 
     def test_pet_crud_requires_current_consents_and_enforces_ownership(self):
         token = self.login().json()['access_token']
@@ -249,8 +188,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.client.patch(detail, headers=headers, json={'neutered': True}).json()['name'], '团团')
         self.assertTrue(self.client.get(detail, headers=headers).json()['neutered'])
         with Session(self.engine) as db, db.begin():
-            verify = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, verify, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
         other = {'Authorization': 'Bearer ' + self.login('other@example.com').json()['access_token']}
         self.client.post(consent, headers=other, json=state['required'])
         self.assertEqual(self.client.get(path, headers=other).json(), [])
@@ -288,8 +226,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
         with Session(self.engine) as db, db.begin():
             attempt = claim_task(db, task_id)
             finish_task(db, task_id, attempt, result={'clips': []})
-            token = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
         complete = self.client.get(path, headers=headers).json()
         self.assertEqual((complete['status'], complete['result']), ('succeeded', {'clips': []}))
         other = {'Authorization': 'Bearer ' + self.login('other@example.com').json()['access_token']}
@@ -312,7 +249,7 @@ class AuthAPITests(AuthAPIFixture, unittest.TestCase):
 class DefaultAppTests(unittest.TestCase):
     def test_default_app_does_not_enable_development_auth(self):
         client = TestClient(main.app)
-        for path in ('login', 'register', 'verify-email'):
+        for path in ('login', 'register'):
             self.assertEqual(client.post(f'/api/v1/auth/{path}', json={}).status_code, 404)
 
     def test_development_app_rejects_weak_signing_key(self):

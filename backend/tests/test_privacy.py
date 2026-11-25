@@ -29,7 +29,7 @@ from app.models import (
     WeightRecord,
 )
 from app.services.consents import grant_consent
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.privacy import PURGE_DELAY, purge_due, purge_user_data, request_deletion
 from app.services.sessions import create_session
 from app.services.tasks import enqueue_task
@@ -110,8 +110,7 @@ class PrivacyAPITests(AuthAPIFixture, unittest.TestCase):
 
     def test_other_user_can_still_login(self):
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
         self.delete_me()
         self.assertEqual(self.login('other@example.com').status_code, 200)
 
@@ -129,8 +128,7 @@ class PurgeFixture(unittest.TestCase):
         self.now = utcnow()
         self.storage = FakePurgeStorage()
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'purge@example.com', 'Strong123', self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'purge@example.com', 'Strong123', self.now)
             credential = db.scalar(select(UserCredential).where(UserCredential.identifier == 'purge@example.com'))
             self.user_id = credential.user_id
             create_session(db, self.user_id, self.now)
@@ -195,8 +193,7 @@ class PurgeFixture(unittest.TestCase):
                 )
             )
             db.add(RequestIdempotency(user_id=self.user_id, key='k1', request_hash='h1'))
-            other = create_email_account(db, 'keep@example.com', 'Strong123', self.now)
-            verify_email(db, other, self.now)
+            create_email_account(db, 'keep@example.com', 'Strong123', self.now)
             other_cred = db.scalar(select(UserCredential).where(UserCredential.identifier == 'keep@example.com'))
             self.other_user_id = other_cred.user_id
             db.add(Pet(user_id=self.other_user_id, name='保留'))
@@ -304,8 +301,7 @@ class TrainingConsentTests(AuthAPIFixture, unittest.TestCase):
 
     def test_training_requires_basic_consent(self):
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'noconsent-training@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'noconsent-training@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("noconsent-training@example.com").json()["access_token"]}'}
         response = self.client.post('/api/v1/consents/training', json={'granted': True}, headers=headers)
         self.assertEqual(response.status_code, 403)

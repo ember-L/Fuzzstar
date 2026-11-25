@@ -59,8 +59,8 @@ export function createSessionClient(send: Send, storage: TokenStorage) {
     async login(email: string, password: string) {
       await save(await read<Tokens>(await send('/auth/login', post({ email, password }))));
     },
-    async sendVerification(path: '/auth/register' | '/auth/resend-verification', email: string, password: string) {
-      return read<{ message: string }>(await send(path, post({ email, password })));
+    async register(email: string, password: string) {
+      await save(await read<Tokens>(await send('/auth/register', post({ email, password }))));
     },
     async authorized<T>(path: string, init?: RequestInit): Promise<T> {
       if (!access) await renew(null);

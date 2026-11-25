@@ -121,10 +121,9 @@ export default function ProfileScreen() {
     Keyboard.dismiss();
     void run(async () => {
       if (registering) {
-        const result = await api.sendVerification('/auth/register', email.trim(), password);
-        setRegistering(false);
-        setNotice(result.message);
+        await api.register(email.trim(), password);
         setPassword('');
+        await load();
       } else {
         await api.login(email.trim(), password);
         setPassword('');
@@ -197,7 +196,7 @@ export default function ProfileScreen() {
             <Image source={require('../../../assets/figma/logo.png')} style={styles.authLogo} accessible={false} />
             <Text style={styles.authBrand}>绒星 · 星光护绒</Text>
             <Text accessibilityRole="header" style={styles.authTitle}>{registering ? '创建绒星账号' : '登录绒星'}</Text>
-            <Text style={styles.authSubtitle}>{registering ? '验证邮箱后，就可以登录。' : '照顾猫咪的点滴，都在这里。'}</Text>
+            <Text style={styles.authSubtitle}>{registering ? '注册后即可开始使用。' : '照顾猫咪的点滴，都在这里。'}</Text>
           </View>
           <View style={styles.authCard}>
             <View style={styles.authField}>
@@ -214,7 +213,7 @@ export default function ProfileScreen() {
               {registering ? <Text style={styles.bodyText}>至少 8 位，同时包含字母和数字。</Text> : null}
             </View>
             {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
-            <Button title={registering ? '注册并发送验证邮件' : '登录'} busy={busy} disabled={missingCredentials}
+            <Button title={registering ? '创建账号' : '登录'} busy={busy} disabled={missingCredentials}
               onPress={submitCredentials} style={styles.authSubmit} />
             {busy ? <Text accessibilityLiveRegion="polite" style={styles.busyText}>处理中…</Text> : null}
           </View>
@@ -224,15 +223,6 @@ export default function ProfileScreen() {
             }} style={({ pressed }) => [styles.authAction, pressed && styles.pressed]}>
               <Text style={styles.authActionText}>{registering ? '已有账号？返回登录' : '创建账号'}</Text>
             </Pressable>
-            {!registering ? (
-              <Pressable accessibilityRole="button" disabled={busy} onPress={() => {
-                if (missingCredentials) { setNotice('填写邮箱和密码后，即可补发验证邮件。'); return; }
-                Keyboard.dismiss();
-                void run(async () => setNotice((await api.sendVerification('/auth/resend-verification', email.trim(), password)).message));
-              }} style={({ pressed }) => [styles.authAction, pressed && styles.pressed]}>
-                <Text style={styles.authActionText}>补发验证邮件</Text>
-              </Pressable>
-            ) : null}
           </View>
         </>
       ) : (

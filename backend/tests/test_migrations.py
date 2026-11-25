@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import MediaUpload, User
 from app.services.consents import grant_consent, has_required_consents
-from app.services.identity import create_email_account, login_email, verify_email
+from app.services.identity import create_email_account, login_email
 from app.services.pets import PetInput, create_pet, list_pets
 from app.services.sessions import create_session, rotate_refresh_token
 from app.services.tasks import claim_task, enqueue_task, finish_task
@@ -41,7 +41,6 @@ class MigrationTests(unittest.TestCase):
                     'consents',
                     'auth_sessions',
                     'refresh_tokens',
-                    'verification_mail',
                     'auth_rate_buckets',
                     'tasks',
                     'media_uploads',
@@ -72,8 +71,7 @@ class MigrationTests(unittest.TestCase):
                 session.commit()
             with Session(engine) as session:
                 self.assertEqual([pet.name for pet in list_pets(session, 1)], ['团团'])
-                token = create_email_account(session, 'cat@example.com', 'Strong123', datetime(2026, 11, 18))
-                verify_email(session, token, datetime(2026, 11, 18))
+                create_email_account(session, 'cat@example.com', 'Strong123', datetime(2026, 11, 18))
                 user = login_email(session, 'cat@example.com', 'Strong123')
                 grant_consent(session, user.id, 'privacy', 'v1', True)
                 grant_consent(session, user.id, 'terms', 'v1', True)

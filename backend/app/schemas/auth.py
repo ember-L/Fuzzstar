@@ -14,10 +14,6 @@ class RefreshInput(BaseModel):
     refresh_token: str = Field(min_length=1, max_length=128)
 
 
-class VerifyEmailInput(BaseModel):
-    token: str = Field(min_length=1, max_length=128)
-
-
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str

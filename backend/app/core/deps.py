@@ -70,9 +70,8 @@ def consented_user(request: Request, user: User = Depends(current_user), db: Ses
 def admin_user(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)) -> User:
     """Require an account whose email is listed in ADMIN_EMAILS.
 
-    Email verification is intentionally not required here: admins authenticate
-    with the account password and the ADMIN_EMAILS whitelist is the trust
-    boundary.
+    Admins authenticate with the account password; the ADMIN_EMAILS whitelist
+    is the trust boundary.
     """
     admins = request.app.state.admin_emails
     if not admins:

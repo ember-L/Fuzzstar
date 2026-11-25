@@ -71,11 +71,10 @@ class AvatarReadTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.read(headers={}).status_code, 401)
 
     def test_requires_consent(self):
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'noconsent3@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'noconsent3@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("noconsent3@example.com").json()["access_token"]}'}
         response = self.read(headers=headers)
         self.assertEqual(response.status_code, 403)
@@ -134,11 +133,10 @@ class AvatarReadTests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(body['status'], 'succeeded')
 
     def test_other_users_pet_404(self):
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("other@example.com").json()["access_token"]}'}
         self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
         self.insert_task('succeeded', make_result())

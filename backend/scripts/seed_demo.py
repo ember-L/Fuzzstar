@@ -37,7 +37,6 @@ from app.services.identity import (
     create_email_account,
     normalize_email,
     password_hasher,
-    verify_email,
 )
 from app.services.pets import PetInput, create_pet
 from app.services.triage import triage, validate_answers
@@ -57,8 +56,7 @@ def _verified_credential(session: Session, email: str, password: str, now: datet
         )
     )
     if credential is None:
-        token = create_email_account(session, email, password, now)
-        verify_email(session, token, now)
+        create_email_account(session, email, password, now)
         credential = session.scalar(
             select(UserCredential).where(
                 UserCredential.type == 'email',
@@ -70,8 +68,6 @@ def _verified_credential(session: Session, email: str, password: str, now: datet
     else:
         credential.secret_hash = password_hasher.hash(password)
         credential.verified_at = credential.verified_at or now
-        credential.verification_hash = None
-        credential.verification_expires_at = None
     user = session.get(User, credential.user_id)
     if user is None:
         raise RuntimeError('demo credential points to a missing user')

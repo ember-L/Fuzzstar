@@ -26,7 +26,6 @@ from app.models import (
     UsageCounter,
     User,
     UserCredential,
-    VerificationMail,
     WeightRecord,
 )
 
@@ -96,7 +95,6 @@ def purge_user_data(db: Session, user_id: int, *, storage, now: datetime) -> boo
     task_ids = select(Task.id).where(Task.pet_id.in_(pet_ids))
     session_ids = select(ChatSession.id).where(ChatSession.user_id == user_id)
     screening_ids = select(HealthScreening.id).where(HealthScreening.user_id == user_id)
-    credential_ids = select(UserCredential.id).where(UserCredential.user_id == user_id)
     auth_session_ids = select(AuthSession.id).where(AuthSession.user_id == user_id)
     db.execute(delete(ChatMessage).where(ChatMessage.session_id.in_(session_ids)))
     db.execute(delete(ChatSession).where(ChatSession.user_id == user_id))
@@ -119,7 +117,6 @@ def purge_user_data(db: Session, user_id: int, *, storage, now: datetime) -> boo
     db.execute(delete(UsageCounter).where(UsageCounter.user_id == user_id))
     db.execute(delete(RefreshToken).where(RefreshToken.session_id.in_(auth_session_ids)))
     db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
-    db.execute(delete(VerificationMail).where(VerificationMail.credential_id.in_(credential_ids)))
     db.execute(delete(UserCredential).where(UserCredential.user_id == user_id))
     db.execute(delete(Consent).where(Consent.user_id == user_id))
     db.delete(job)

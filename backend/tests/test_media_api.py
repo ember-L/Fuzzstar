@@ -12,7 +12,7 @@ from test_auth_api import AuthAPIFixture
 
 from app import main
 from app.models import MediaUpload
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.media import PhotoStorage, valid_photo
 
 # 1×1 PNG; no user media in the test suite.
@@ -145,8 +145,7 @@ class MediaAPITests(AuthAPIFixture, TestCase):
         storage = self.configure_storage()
         signed = self.presign().raise_for_status().json()
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
         headers = {'Authorization': 'Bearer ' + self.login('other@example.com').json()['access_token']}
         self.client.post('/api/v1/consents', headers=headers, json=self.versions).raise_for_status()
         with patch.object(storage.client, 'head_object', side_effect=AssertionError('unauthorized storage access')):

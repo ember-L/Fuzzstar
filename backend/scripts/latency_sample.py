@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app import main as app_main
 from app.core.security import utcnow
 from app.models import Base
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 from app.services.tasks import enqueue_task
 
 ENDPOINTS = ('health', 'pets', 'pet_health', 'quota', 'diet_day', 'weights', 'action_map', 'task')
@@ -62,8 +62,7 @@ def measure(*, samples=200):
         Base.metadata.create_all(engine)
         now = utcnow()
         with Session(engine) as db, db.begin():
-            token = create_email_account(db, 'bench@example.com', 'Strong123', now)
-            verify_email(db, token, now)
+            create_email_account(db, 'bench@example.com', 'Strong123', now)
         all_durations = []
         endpoints = {}
         with TestClient(app) as client:

@@ -135,11 +135,10 @@ class GifAPITests(AuthAPIFixture, unittest.TestCase):
         self.assertEqual(self.share(headers={}).status_code, 401)
 
     def test_requires_consent(self):
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'noconsent-gif@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'noconsent-gif@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("noconsent-gif@example.com").json()["access_token"]}'}
         response = self.share(headers=headers)
         self.assertEqual(response.status_code, 403)
@@ -186,12 +185,11 @@ class GifAPITests(AuthAPIFixture, unittest.TestCase):
             self.assertEqual(task.payload['clip_version_id'], 'v-idle')
 
     def test_other_users_pet_404(self):
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         self.insert_avatar()
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, 'other-gif@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other-gif@example.com', self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login("other-gif@example.com").json()["access_token"]}'}
         self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()
         self.assertEqual(self.share(headers=headers).status_code, 404)

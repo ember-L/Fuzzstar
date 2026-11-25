@@ -2,11 +2,14 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { getNotifications } from '../lib/expo-notifications-safe';
 import { routeFromNotificationData } from '../lib/recheck-reminder';
 import { offlineSync } from '../lib/offline-sync';
 
-if (Platform.OS !== 'web') {
+// Expo Go 等环境可能缺少 expo-notifications 原生模块：缺失时跳过通知，不影响页面渲染。
+const Notifications = Platform.OS === 'web' ? null : getNotifications();
+
+if (Notifications) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
   });
@@ -21,7 +24,9 @@ export default function RootLayout() {
   }, []);
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+    const module = getNotifications();
+    if (!module) return;
+    const subscription = module.addNotificationResponseReceivedListener(response => {
       const route = routeFromNotificationData(response.notification.request.content.data as Record<string, unknown>);
       if (route) router.push(route);
     });

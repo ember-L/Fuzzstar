@@ -26,7 +26,7 @@ from app.services.chat import (
     parse_chat_reply,
     redline_response,
 )
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 
 RULES_DIR = Path(__file__).resolve().parents[1] / 'rules'
 CONFIG = load_chat_config(RULES_DIR)
@@ -133,8 +133,7 @@ class ChatFixture(AuthAPIFixture):
 
     def verified_account(self, email, consent=True):
         with Session(self.engine) as db, db.begin():
-            token = create_email_account(db, email, self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, email, self.password, self.now)
         headers = {'Authorization': f'Bearer {self.login(email).json()["access_token"]}'}
         if consent:
             self.client.post(

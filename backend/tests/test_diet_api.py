@@ -55,11 +55,10 @@ class DietFixture(AuthAPIFixture):
             return record.id
 
     def other_headers(self):
-        from app.services.identity import create_email_account, verify_email
+        from app.services.identity import create_email_account
 
         with Session(self.engine) as db:
-            token = create_email_account(db, 'other@example.com', self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, 'other@example.com', self.password, self.now)
             db.commit()
         headers = {'Authorization': 'Bearer ' + self.login(email='other@example.com').json()['access_token']}
         self.client.post('/api/v1/consents', headers=headers, json={'privacy': 'p1', 'terms': 't1'}).raise_for_status()

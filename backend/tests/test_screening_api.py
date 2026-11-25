@@ -8,7 +8,7 @@ from test_auth_api import AuthAPIFixture
 
 from app.core.security import utcnow
 from app.models import HealthEvent, HealthScreening, MediaUpload, ScreeningMedia, Task
-from app.services.identity import create_email_account, verify_email
+from app.services.identity import create_email_account
 
 DISCLAIMER = 'AI 结果仅供日常健康管理参考,不替代专业兽医诊断'
 CARD_TITLE = '建议立即就医'
@@ -36,8 +36,7 @@ class ScreeningFixture(AuthAPIFixture):
 
     def verified_account(self, email, consent=True):
         with Session(self.engine) as db:
-            token = create_email_account(db, email, self.password, self.now)
-            verify_email(db, token, self.now)
+            create_email_account(db, email, self.password, self.now)
             db.commit()
         if consent:
             headers = {'Authorization': 'Bearer ' + self.login(email=email).json()['access_token']}

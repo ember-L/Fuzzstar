@@ -1,8 +1,7 @@
-"""Create or reset a console admin account — no email verification required.
+"""Create or reset a console admin account.
 
-The account's email credential is marked verified immediately and the login
-router accepts whitelisted admins without the verification flow, so SMTP and
-verification mail are never needed.
+Accounts are usable immediately (the email verification flow was removed),
+so SMTP and verification mail are never needed.
 
 Usage (from backend/):
 
@@ -17,7 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.env import load_env
@@ -62,20 +61,13 @@ def main() -> None:
                 raise SystemExit(f'邮箱已被注册：{exc}') from exc
         else:
             credential.secret_hash = password_hasher.hash(args.password)
+            credential.verified_at = now
             user = db.get(User, credential.user_id)
             if user is not None and user.status != 'active':
                 user.status = 'active'
                 print('已将该账户状态恢复为 active。')
             print('已重置现有账户的密码。')
-        db.execute(
-            update(UserCredential)
-            .where(
-                UserCredential.type == 'email',
-                UserCredential.identifier == email,
-            )
-            .values(verified_at=now, verification_hash=None, verification_expires_at=None)
-        )
-    print(f'管理员账户已就绪：{email}（邮箱已标记为已验证，无需验证邮件）')
+    print(f'管理员账户已就绪：{email}')
 
 
 if __name__ == '__main__':
