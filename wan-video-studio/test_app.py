@@ -95,8 +95,8 @@ class StudioTest(unittest.TestCase):
         gen = send.call_args_list[1]
         prompt = gen.kwargs['json']['prompt']
         self.assertIn('橘白猫', prompt)
-        self.assertIn('卡通 2.5D', prompt)
-        self.assertNotIn('主人补充', prompt)
+        self.assertIn('cartoon 2.5D', prompt)
+        self.assertNotIn('Owner notes', prompt)
         saved = self.client.get(data['download_url'])
         self.assertEqual(saved.status_code, 200)
         with Image.open(io.BytesIO(saved.data)) as image:
@@ -170,7 +170,7 @@ class StudioTest(unittest.TestCase):
             prompt = saved.read()
         self.assertIn('开心', prompt)
         self.assertIn('#FEECD4', prompt)
-        self.assertIn('反面要求', prompt)
+        self.assertIn('Negative prompt', prompt)
         self.assertTrue(os.path.isfile(os.path.join(self.state, 'jobs', job_id, 'first.png')))
         status = self.client.get('/api/videos/' + job_id).json
         self.assertIn(status['status'], ('queued', 'running'))

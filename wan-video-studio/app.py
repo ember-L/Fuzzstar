@@ -37,34 +37,61 @@ ACTIONS = {
     'look_right': ('右看', '朝画面右侧看一眼', '目光与头部一起轻转向画面右侧（观众的右手边），幅度很小，身体不转动。'),
 }
 IDENTITY = (
-    '以上传图为首帧，保持同一只宠物的物种、毛色、花纹、眼睛颜色及耳形。'
-    '整体为卡通 2.5D 画风：圆润简化的形体、干净平涂与 2 层柔和分层阴影、成组蓬松绒毛块（不出现写实毛发丝），背景保持纯色 #FEECD4。'
-    '保持首帧的构图、背景和主体位置，固定机位，不重构画外部位。开头短暂停住，中间只做一次小动作，结尾自然停稳。'
+    'Use the uploaded image as the first frame; keep the same pet\u2019s species, fur colors, markings, eye '
+    'color, and ear shape. Overall cartoon 2.5D style: rounded simplified forms, clean flat colors with two '
+    'layers of soft layered shading, grouped fluffy fur blocks (no realistic hair strands); the background '
+    'stays solid #FEECD4. Keep the first frame\u2019s composition, background, and subject position; fixed '
+    'camera; do not invent off-frame body parts. Hold still briefly at the start, perform one small action '
+    'in the middle, and settle naturally at the end.'
 )
-NEGATIVE = '换宠物，毛色或花纹漂移，五官变形，四肢增生，夸张拟人表情，写实毛发，塑料质感，粗黑描边，硬光，背景跳变，镜头移动或变焦，切镜头，画面闪烁。'
+NEGATIVE = (
+    'changing the pet, fur color or marking drift, deformed facial features, extra limbs, exaggerated '
+    'human-like expressions, realistic fur, plastic texture, heavy black outlines, harsh light, background '
+    'jumps, camera movement or zoom, shot cuts, flickering.'
+)
 # 生图提示词：glm-image 只收文本，先用 glm-5.3-flash 识别照片特征，再拼成完整提示词。
 PORTRAIT_REFERENCE = (
-    '以识别到的这只宠物为原型，保留它的物种、毛色、花纹、耳形、眼睛颜色与体型比例，重绘成一张完整的全身角色立绘：'
-    '从头顶、耳朵到最后一只脚掌和尾巴尖，全部完整落在画面内，任何部位都不被画框裁切；'
-    '照片若只拍到半身或局部，请按同一只宠物的毛色与体型合理补全后腿、脚掌和尾巴，不要沿用照片的裁切构图。'
+    'Recreate the pet identified from the photo as a complete full-body character illustration: '
+    'keep its species, fur colors and markings, ear shape, eye color, and body proportions. '
+    'The whole body, from the top of the head and ears to the last paw and the tail tip, must fit fully '
+    'inside the frame without being cropped. If the photo only shows a half-body or partial view, '
+    'complete the hind legs, paws, and tail consistently with the same pet\u2019s fur colors and body type; '
+    'do not reuse the photo\u2019s cropped composition.'
 )
 PORTRAIT_BODY = (
-    '画风：卡通 2.5D，带明显 3D 动画电影质感 —— 圆润立体的形体有清晰体积感与厚度，柔和的全局光照，暗部带轻微环境光遮蔽，边缘一道细软的轮廓光让主体从背景中浮出来；'
-    '头略大、眼睛大而圆、口鼻小巧、四肢短圆；毛发概括成几组清晰的蓬松绒毛块，末端少量短毛尖，不画单根写实毛发丝；'
-    '整体像高品质 3D 动画电影的角色设定渲染：材质干净、略带哑光绒感，保持卡通比例与简化细节；不要写实摄影感、不要毛绒玩偶实拍感、不要纯 2D 平涂插画。'
-    '构图：正方形 1:1，全身完整入画，头顶、耳朵、四只脚掌与尾尖全部可见且不贴边；'
-    '宠物为纵向站姿或坐姿（四脚着地、身体朝上延伸），不要横向趴卧、不要压扁身体；'
-    '主体居中，高度约占画面 72%，四周留白均衡（上下各约 12%、左右各约 14%）；'
-    '平视四分之三侧身，安静看向镜头，姿态自然放松。'
-    '背景：纯色 #FEECD4（RGB 254, 236, 212），是明亮偏浅的奶油底色，比常见米色更亮更淡；'
-    '完全平涂，无渐变、无暗角、无光斑、无地面线、无道具、无文字；主体脚下只留极淡的柔和接触阴影。'
-    '光色：左上方柔和漫射主光，暖调浅阴影，整体明亮干净，主色不超过 4 种。'
+    'Style: cartoon 2.5D with clear 3D animated-feature quality. Rounded volumetric forms with a solid sense '
+    'of volume and thickness; soft global lighting with subtle ambient occlusion in the shadows; a thin soft '
+    'rim light along the silhouette so the subject floats off the background. Slightly oversized head, large '
+    'round eyes, small muzzle, short rounded limbs. Fur is summarized into a few clean fluffy tufts with a '
+    'few short tips at the ends; never draw individual realistic hair strands. The overall look is a '
+    'high-quality 3D animated-movie character render: clean materials with a slightly matte plush feel, '
+    'keeping cartoon proportions and simplified details. Avoid photorealistic rendering, avoid a plush-toy '
+    'product-photo look, and avoid flat 2D illustration. '
+    'Composition: square 1:1, full body in frame; the top of the head, ears, all four paws, and the tail tip '
+    'must be visible and must not touch the frame edges. The pet stands or sits upright on all fours with '
+    'the body extending upward; no horizontal lying pose and no flattened body. Subject centered, height '
+    'about 72% of the frame, balanced margins (about 12% top and bottom, 14% left and right). Eye-level '
+    'three-quarter side view, calmly looking at the camera in a relaxed natural pose. '
+    'Background: solid #FEECD4 (RGB 254, 236, 212), a bright light cream tone, brighter and paler than '
+    'typical beige. Perfectly flat: no gradient, no vignette, no light spots, no ground line, no props, '
+    'no text; only a very soft contact shadow under the paws. '
+    'Lighting: soft diffuse key light from the upper left, warm light shadows, bright and clean overall, '
+    'no more than 4 main colors.'
 )
-PORTRAIT_NEGATIVE = '写实毛发，写实渲染，纯 2D 平涂，扁平贴纸感，无体积感，线稿风，毛绒玩偶摄影感，单根毛发丝，渐变背景，背景偏暗，暗角，复杂背景，地面反光，道具，文字，水印，多肢，断肢，尾巴或脚被裁切，横向趴卧，身体被压扁，半身像，胸部以上特写，只画头部和前胸，沿用参考图的裁切构图，四肢出框，尾巴出框，主体贴边，五官畸形，粗黑描边，硬光，镜头畸变，鱼眼，过曝。'
+PORTRAIT_NEGATIVE = (
+    'realistic fur, realistic rendering, flat 2D, flat sticker look, no volume, line art, plush-toy '
+    'photography, individual hair strands, gradient background, dark background, vignette, complex '
+    'background, floor reflection, props, text, watermark, extra limbs, missing limbs, cropped tail or '
+    'cropped paws, horizontal lying pose, flattened body, half-body shot, chest-up close-up, only head and '
+    'chest, reusing the reference crop, limbs out of frame, tail out of frame, subject touching the frame '
+    'edges, deformed face, heavy black outlines, harsh light, lens distortion, fisheye, overexposure'
+)
 VISION_PROMPT = (
-    '观察这张宠物照片，用一段中文客观描述它的外形特征，供画师按描述重绘。必须覆盖：'
-    '物种与品种倾向；毛色与花纹分布（哪里是什么颜色）；耳朵形状与朝向；眼睛颜色；'
-    '体型与姿态（站/坐/趴，朝向）；胡须、爪色、尾形等明显特征。只描述可见特征，不猜测情绪，不超过 150 字。'
+    'Observe this pet photo and write one objective English paragraph describing its appearance for an '
+    'illustrator who will redraw it. Must cover: species and likely breed; fur colors and where each '
+    'marking appears; ear shape and orientation; eye color; body type and posture (standing, sitting, or '
+    'lying, and facing direction); distinct features such as whiskers, paw color, and tail shape. Describe '
+    'only visible features, do not guess emotions, under 80 English words.'
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -76,8 +103,8 @@ PET_EXTRA_DESCRIPTION = ''
 
 # 对比提示词：填写后每次生成形象时，网页会额外用它重绘一版形象做并排对比；
 # 只影响网页展示，不参与视频生成；留空则不做对比图（省一次生图费用）。
-# 例如：'Q 版盲盒手办风，保留原毛色与花纹' / '改成像素风格，保留橘白毛色'
-COMPARE_PROMPT = 'Q 版盲盒手办风，保留原毛色与花纹'
+# 例如：'Chibi blind-box toy figurine style, keep the original fur colors and markings'
+COMPARE_PROMPT = 'Chibi blind-box toy figurine style, keep the original fur colors and markings'
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -227,8 +254,8 @@ def create_app(state_dir=None, worker=None):
         photo = normalize_photo(raw)
         description = (PET_EXTRA_DESCRIPTION or '').strip()[:MAX_DESCRIPTION]
         features = vision_describe(photo)
-        prompt = '；'.join(part for part in (PORTRAIT_REFERENCE, '照片特征：' + features,
-                                            f'主人补充：{description}' if description else '', PORTRAIT_BODY) if part)
+        prompt = '; '.join(part for part in (PORTRAIT_REFERENCE, 'Photo features: ' + features,
+                                            f'Owner notes: {description}' if description else '', PORTRAIT_BODY) if part)
         photo_id = secrets.token_hex(12)
         with open(os.path.join(photos, photo_id + '.png'), 'wb') as saved:
             saved.write(photo)
@@ -243,10 +270,11 @@ def create_app(state_dir=None, worker=None):
         # 对比提示词来自顶部配置区：只重绘一版形象在网页上并排展示，视频首帧仍用原形象。
         compare_prompt = (COMPARE_PROMPT or '').strip()[:1000]
         if compare_prompt:
-            style = ('；'.join(filter(None, (
-                PORTRAIT_REFERENCE, '照片特征：' + features,
-                '画风与效果要求（以下要求优先，覆盖默认画风）：' + compare_prompt,
-                '构图硬性要求：正方形 1:1 全身立绘，主体完整不裁切，纯色 #FEECD4 背景。'))))
+            style = ('; '.join(filter(None, (
+                PORTRAIT_REFERENCE, 'Photo features: ' + features,
+                'Style and effect requirements (these take priority over the default style): ' + compare_prompt,
+                'Hard composition requirements: square 1:1 full-body illustration, subject fully in frame and '
+                'not cropped, solid #FEECD4 background.'))))
             compare = validate_image(zhipu_image(style))
             compare = downscale(compare, PORTRAIT_SIZE, 'PNG')
             compare_id = secrets.token_hex(12)
@@ -296,7 +324,7 @@ def create_app(state_dir=None, worker=None):
         if not 4 <= duration <= 10:
             abort(400, '视频时长需在 4–10 秒之间。')
 
-        prompt = f'{IDENTITY} 动作要求：{title}——{motion}。{description} 反面要求：{NEGATIVE}'
+        prompt = f'{IDENTITY} Action: {title} - {motion}. {description} Negative prompt: {NEGATIVE}'
         job_id = secrets.token_hex(8)
         job_dir = os.path.join(jobs, job_id)
         os.makedirs(job_dir, exist_ok=True)
