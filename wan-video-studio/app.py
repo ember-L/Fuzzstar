@@ -67,6 +67,19 @@ VISION_PROMPT = (
     '体型与姿态（站/坐/趴，朝向）；胡须、爪色、尾形等明显特征。只描述可见特征，不猜测情绪，不超过 150 字。'
 )
 
+# ═══════════════════════════════════════════════════════════════════════
+# 提示词配置区（页面上不再填写提示词）：改这里，保存后重启工作台即生效
+# ═══════════════════════════════════════════════════════════════════════
+# 主人补充描述：描述这只宠物独有的外形特征，会拼进生图提示词；留空则跳过。
+# 例如：'耳朵尖有一撮白毛，浅蓝色眼睛，尾巴很蓬松'
+PET_EXTRA_DESCRIPTION = ''
+
+# 对比提示词：填写后每次生成形象时，网页会额外用它重绘一版形象做并排对比；
+# 只影响网页展示，不参与视频生成；留空则不做对比图（省一次生图费用）。
+# 例如：'Q 版盲盒手办风，保留原毛色与花纹' / '改成像素风格，保留橘白毛色'
+COMPARE_PROMPT = 'Q 版盲盒手办风，保留原毛色与花纹'
+# ═══════════════════════════════════════════════════════════════════════
+
 
 class JobError(RuntimeError):
     """生成任务失败，消息会原样展示给页面。"""
@@ -212,7 +225,7 @@ def create_app(state_dir=None, worker=None):
         if len(raw) > MAX_PHOTO:
             abort(413, '照片超过 10 MB，请换一张小一些的。')
         photo = normalize_photo(raw)
-        description = (request.form.get('description') or '').strip()[:MAX_DESCRIPTION]
+        description = (PET_EXTRA_DESCRIPTION or '').strip()[:MAX_DESCRIPTION]
         features = vision_describe(photo)
         prompt = '；'.join(part for part in (PORTRAIT_REFERENCE, '照片特征：' + features,
                                             f'主人补充：{description}' if description else '', PORTRAIT_BODY) if part)
@@ -227,8 +240,8 @@ def create_app(state_dir=None, worker=None):
         data_url = 'data:image/png;base64,' + base64.b64encode(portrait).decode()
         result = {'image_id': image_id, 'image': data_url,
                   'download_url': f'/api/images/{image_id}/image?download=1'}
-        # 对比提示词：只重绘一版形象在网页上并排展示，视频首帧仍用上面的原形象。
-        compare_prompt = (request.form.get('compare_prompt') or '').strip()[:1000]
+        # 对比提示词来自顶部配置区：只重绘一版形象在网页上并排展示，视频首帧仍用原形象。
+        compare_prompt = (COMPARE_PROMPT or '').strip()[:1000]
         if compare_prompt:
             style = ('；'.join(filter(None, (
                 PORTRAIT_REFERENCE, '照片特征：' + features,

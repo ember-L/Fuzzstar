@@ -4,8 +4,6 @@ const inputs = byId('inputs');
 const fileInput = byId('image');
 const drop = byId('drop');
 const thumb = byId('upload-thumb');
-const desc = byId('pet-desc');
-const comparePrompt = byId('compare-prompt');
 const compareBox = byId('compare-box');
 const compareImg = byId('compare-img');
 const originalMini = byId('original-mini');
@@ -213,8 +211,6 @@ async function generatePortrait() {
   try {
     const body = new FormData();
     body.append('image', originalFile, originalFile.name);
-    body.append('description', desc.value.trim());
-    body.append('compare_prompt', comparePrompt.value.trim());
     const data = await call('./api/portrait', {
       method: 'POST',
       headers: { 'X-Studio-Request': '1' },

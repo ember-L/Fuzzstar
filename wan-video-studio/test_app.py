@@ -64,6 +64,10 @@ class StudioTest(unittest.TestCase):
         self.assertIn('name="action"', html)
         self.assertIn('id="duration"', html)
         self.assertIn('待机', html)
+        self.assertIn('提示词配置区', html)
+        # 提示词只在 app.py 配置区维护，页面不再提供输入框
+        self.assertNotIn('id="pet-desc"', html)
+        self.assertNotIn('id="compare-prompt"', html)
         self.assertNotIn('Wan 3.0', html)
         self.assertNotIn('test-key', html)
 
@@ -73,15 +77,15 @@ class StudioTest(unittest.TestCase):
 
     @patch('app.httpx.request')
     def test_portrait_pipeline_saves_image(self, send):
-        send.side_effect = [
-            httpx.Response(200, json={'choices': [{'message': {'content': '橘白猫，白色胸口，金色眼睛，坐姿'}}]}),
-            httpx.Response(200, json={'data': [{'url': 'https://example.com/pet.png'}]}),
-            httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
-        ]
-        result = self.client.post('/api/portrait', headers=self.headers, data={
-            'image': (io.BytesIO(photo_bytes()), 'cat.jpg'),
-            'description': '耳朵尖有一撮白毛',
-        }, content_type='multipart/form-data')
+        with patch.object(studio, 'COMPARE_PROMPT', ''):
+            send.side_effect = [
+                httpx.Response(200, json={'choices': [{'message': {'content': '橘白猫，白色胸口，金色眼睛，坐姿'}}]}),
+                httpx.Response(200, json={'data': [{'url': 'https://example.com/pet.png'}]}),
+                httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
+            ]
+            result = self.client.post('/api/portrait', headers=self.headers, data={
+                'image': (io.BytesIO(photo_bytes()), 'cat.jpg'),
+            }, content_type='multipart/form-data')
         self.assertEqual(result.status_code, 200)
         data = result.json
         self.assertTrue(data['image_id'])
@@ -91,8 +95,8 @@ class StudioTest(unittest.TestCase):
         gen = send.call_args_list[1]
         prompt = gen.kwargs['json']['prompt']
         self.assertIn('橘白猫', prompt)
-        self.assertIn('耳朵尖有一撮白毛', prompt)
         self.assertIn('卡通 2.5D', prompt)
+        self.assertNotIn('主人补充', prompt)
         saved = self.client.get(data['download_url'])
         self.assertEqual(saved.status_code, 200)
         with Image.open(io.BytesIO(saved.data)) as image:
@@ -100,17 +104,17 @@ class StudioTest(unittest.TestCase):
 
     @patch('app.httpx.request')
     def test_compare_prompt_renders_extra_portrait_only_for_web(self, send):
-        send.side_effect = [
-            httpx.Response(200, json={'choices': [{'message': {'content': '橘白猫'}}]}),
-            httpx.Response(200, json={'data': [{'url': 'https://example.com/a.png'}]}),
-            httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
-            httpx.Response(200, json={'data': [{'url': 'https://example.com/b.png'}]}),
-            httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
-        ]
-        result = self.client.post('/api/portrait', headers=self.headers, data={
-            'image': (io.BytesIO(photo_bytes()), 'cat.jpg'),
-            'compare_prompt': '改成像素风',
-        }, content_type='multipart/form-data')
+        with patch.object(studio, 'COMPARE_PROMPT', '改成像素风'):
+            send.side_effect = [
+                httpx.Response(200, json={'choices': [{'message': {'content': '橘白猫'}}]}),
+                httpx.Response(200, json={'data': [{'url': 'https://example.com/a.png'}]}),
+                httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
+                httpx.Response(200, json={'data': [{'url': 'https://example.com/b.png'}]}),
+                httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
+            ]
+            result = self.client.post('/api/portrait', headers=self.headers, data={
+                'image': (io.BytesIO(photo_bytes()), 'cat.jpg'),
+            }, content_type='multipart/form-data')
         self.assertEqual(result.status_code, 200)
         data = result.json
         self.assertIn('像素风', send.call_args_list[3].kwargs['json']['prompt'])
@@ -118,6 +122,21 @@ class StudioTest(unittest.TestCase):
         self.assertTrue(data['compare']['image'].startswith('data:image/png;base64,'))
         # 两张形象都能单独下载
         self.assertEqual(self.client.get(data['compare']['download_url']).status_code, 200)
+
+    @patch('app.httpx.request')
+    def test_compare_disabled_by_default(self, send):
+        with patch.object(studio, 'COMPARE_PROMPT', ''):
+            send.side_effect = [
+                httpx.Response(200, json={'choices': [{'message': {'content': '橘白猫'}}]}),
+                httpx.Response(200, json={'data': [{'url': 'https://example.com/a.png'}]}),
+                httpx.Response(200, headers={'Content-Type': 'image/png'}, content=photo_bytes((1024, 1024))),
+            ]
+            result = self.client.post('/api/portrait', headers=self.headers, data={
+                'image': (io.BytesIO(photo_bytes()), 'cat.jpg'),
+            }, content_type='multipart/form-data')
+        self.assertEqual(result.status_code, 200)
+        self.assertNotIn('compare', result.json)
+        self.assertEqual(len(send.call_args_list), 3)
 
     @patch('app.httpx.request')
     def test_portrait_upstream_error_is_reported(self, send):
