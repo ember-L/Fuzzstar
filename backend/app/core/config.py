@@ -20,7 +20,7 @@ from app.providers.zhipu import ZhipuLLMProvider
 from app.services.advice import load_advice_templates
 from app.services.chat import load_chat_config
 from app.services.feeding import load_feeding_config
-from app.services.media import PhotoStorage
+from app.services.media import LocalPhotoStorage, PhotoStorage
 from app.services.motion import load_motion_config
 from app.services.placeholders import load_library
 from app.services.rules import load_action_map
@@ -100,7 +100,7 @@ class Settings:
             jwt_secret=jwt_secret,
             policy_versions=versions,
             policy_links=links,
-            photo_storage=PhotoStorage.from_env(),
+            photo_storage=PhotoStorage.from_env() or LocalPhotoStorage.from_env(),
             action_map=load_action_map(rules_dir),
             triage_rules=load_rules(rules_dir),
             advice_templates=load_advice_templates(rules_dir),

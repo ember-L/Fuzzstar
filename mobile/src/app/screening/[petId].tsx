@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Screen } from '../../components/Screen';
@@ -7,7 +8,7 @@ import { Button } from '../../components/ui/Button';
 import { EntryRow } from '../../components/ui/EntryRow';
 import { api } from '../../lib/api';
 import { cancelPetRechecks } from '../../lib/notifications';
-import { MediaUploadError, uploadMedia } from '../../lib/photo-upload';
+import { MediaUploadError, uploadMedia, type MediaSource } from '../../lib/photo-upload';
 import { buildPayload, emptyForm, mediaLimitError, missingFields, type ScreeningForm, type SymptomsConfig } from '../../lib/screening';
 import { ApiError } from '../../lib/session';
 import { colors } from '../../theme';
@@ -17,7 +18,7 @@ const APPETITE_LABELS: Record<string, string> = { normal: '食欲正常', decrea
 const DURATION_LABELS: Record<string, string> = { '<2h': '不到 2 小时', '2-12h': '2–12 小时', '12-24h': '12–24 小时', '>24h': '超过 24 小时' };
 const FREQUENCY_LABELS: Record<string, string> = { '1': '1 次', '2-3': '2–3 次', '4-6': '4–6 次', '>6': '超过 6 次' };
 
-type PendingMedia = { key: string; kind: 'photo' | 'video'; uri: string; file: Blob };
+type PendingMedia = { key: string; kind: 'photo' | 'video'; file: MediaSource };
 
 export default function ScreeningScreen() {
   const { petId } = useLocalSearchParams<{ petId: string }>();
@@ -75,11 +76,10 @@ export default function ScreeningScreen() {
     if (result.canceled) return;
     const asset = result.assets[0];
     try {
-      const response = await fetch(asset.uri);
-      const raw = await response.blob();
-      const type = asset.mimeType ?? (kind === 'photo' ? 'image/jpeg' : 'video/mp4');
-      const file = raw.type ? raw : new Blob([raw], { type });
-      setPending(prev => [...prev, { key: `${Date.now()}-${prev.length}`, kind, uri: asset.uri, file }]);
+      // SDK 58 的全局 fetch 只接受 Blob / 带 bytes() 的 File，{ uri } 描述会被拒绝。
+      const file = new File(asset.uri);
+      if (file.size <= 0) { setProblem('无法读取所选文件，请重新选择。'); return; }
+      setPending(prev => [...prev, { key: `${Date.now()}-${prev.length}`, kind, file }]);
       setProblem(null);
     } catch {
       setProblem('无法读取所选文件，请重试。');

@@ -12,3 +12,5 @@ Pillow==12.3.0
 pillow-heif==1.8.1
 arq==0.28.0
 PyYAML==6.0.3
+python-multipart
+

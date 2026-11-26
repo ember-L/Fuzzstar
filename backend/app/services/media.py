@@ -234,3 +234,55 @@ def valid_photo(data: bytes, content_type: str) -> bool:
     except (OSError, ValueError, SyntaxError, EOFError, Image.DecompressionBombError):
         return False
     return True
+
+
+class LocalPhotoStorage:
+    """开发环境本地磁盘存储：未配置 S3 时降级，队友 clone 即用（FRD 媒体存证）。
+
+    文件存 MEDIA_LOCAL_DIR（默认 ./uploads），version_id 固定 'local'。
+    upload/download URL 指向本后端的无鉴权端点（凭 media_id 随机串 + complete 鉴权保护）。
+    """
+
+    def __init__(self, directory: Path, base_url: str):
+        self.directory = directory
+        self.base_url = base_url.rstrip('/')
+
+    @classmethod
+    def from_env(cls):
+        directory = Path(os.environ.get('MEDIA_LOCAL_DIR', 'uploads'))
+        directory.mkdir(parents=True, exist_ok=True)
+        host = os.environ.get('SERVER_HOST', '127.0.0.1').strip()
+        port = os.environ.get('PORT', '8000').strip()
+        base = os.environ.get('MEDIA_PUBLIC_BASE', f'http://{host}:{port}').strip()
+        return cls(directory, base)
+
+    def path_for(self, media_id: str) -> Path:
+        return self.directory / media_id
+
+    def save(self, media_id: str, data: bytes) -> None:
+        self.path_for(media_id).write_bytes(data)
+
+    def presign(self, photo: MediaUpload) -> dict:
+        # 前端按 S3 presigned POST 协议上传（FormData 带 fields + file），本地 fields 为空即可。
+        return {'url': f'{self.base_url}/api/v1/media/local-upload/{photo.id}', 'fields': {}}
+
+    def verify(self, photo: MediaUpload) -> str:
+        path = self.path_for(photo.id)
+        if not path.exists():
+            raise APIError(409, 'MEDIA_NOT_UPLOADED', '尚未收到媒体文件，请先上传')
+        data = path.read_bytes()
+        if photo.kind == 'video':
+            valid, message = valid_video(data, photo.content_type), '视频无效或超过 30 秒'
+        elif photo.kind == 'audio':
+            valid, message = valid_audio(data, photo.content_type), '音频无效或时长不在 1–60 秒'
+        else:
+            valid, message = valid_photo(data, photo.content_type), '照片格式无效或像素超限'
+        if len(data) != photo.size_bytes or not valid:
+            raise APIError(422, 'MEDIA_INVALID', message)
+        return 'local'
+
+    def download_url(self, photo: MediaUpload) -> str:
+        return f'{self.base_url}/api/v1/media/local-file/{photo.id}'
+
+    def asset_url(self, key: str, version_id: str) -> str:
+        return f'{self.base_url}/api/v1/media/local-file/{key}'

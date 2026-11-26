@@ -1,11 +1,10 @@
-import { fetch as sendUpload } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import { launchImageLibraryAsync } from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../lib/api';
 import type { PlaceholderManifest } from '../lib/avatar';
-import { PhotoUploadError, uploadPhoto } from '../lib/photo-upload';
+import { PhotoUploadError, uploadPhoto, type MediaSource } from '../lib/photo-upload';
 import { QUOTA_EXHAUSTED_HINT } from '../lib/quota';
 import { ApiError } from '../lib/session';
 import { colors } from '../theme';
@@ -17,7 +16,7 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false, endpoint
   quotaExhausted?: boolean;
   endpoint?: 'avatar' | 'motion';
 }) {
-  const [photo, setPhoto] = useState<{ file: Blob; name: string }>();
+  const [photo, setPhoto] = useState<{ source: MediaSource; name: string }>();
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [lastMediaId, setLastMediaId] = useState<string>();
@@ -38,8 +37,9 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false, endpoint
       const asset = result.assets[0];
       if (Platform.OS === 'web') URL.revokeObjectURL(asset.uri);
       if (controller.signal.aborted) return;
-      const file = asset.file ?? new File(asset.uri);
-      setPhoto({ file, name: asset.fileName || '已选照片' });
+      // Web 上是 DOM File（Blob）；原生用 expo-file-system 的 File，SDK 58 的 fetch 只接受这两类。
+      const source: MediaSource = asset.file ?? new File(asset.uri);
+      setPhoto({ source, name: asset.fileName || '已选照片' });
       setMessage('');
     } catch {
       if (!controller.signal.aborted) {
@@ -90,7 +90,7 @@ export function PhotoUpload({ pet, onSubmitted, quotaExhausted = false, endpoint
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 60_000);
     try {
-      const mediaId = await uploadPhoto(pet.id, photo.file, api.authorized, sendUpload, controller.signal);
+      const mediaId = await uploadPhoto(pet.id, photo.source, api.authorized, (url, init) => fetch(url, init), controller.signal);
       setPhoto(undefined);
       setMessage(endpoint === 'motion' ? '照片已验证，正在提交萌宠动图生成…' : '照片已验证，正在提交分身生成…');
       await submitGeneration(mediaId, controller.signal);
